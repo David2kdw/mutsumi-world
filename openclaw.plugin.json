@@ -1,0 +1,7 @@
+{
+  "id": "openclaw-mutsumi-world",
+  "name": "Mutsumi World",
+  "description": "若叶睦「楚门的世界」世界模拟插件",
+  "extensions": ["./dist/index.js"],
+  "capabilities": {}
+}
