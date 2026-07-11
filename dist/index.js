@@ -16,7 +16,8 @@ const plugin = {
     configSchema: emptyPluginConfigSchema(),
     register(api) {
         const baseDir = getDataDir(api.runtime) || process.env.HOME || process.env.USERPROFILE || ".";
-        const workspaceDir = path.resolve(baseDir, "..", "workspace");
+        // OpenClaw workspace 固定路径：~/.openclaw/workspace
+        const workspaceDir = path.join(baseDir, ".openclaw", "workspace");
         const dataDir = path.resolve(baseDir, "mutsumi-world");
         const log = createLogger(dataDir, api.logger);
         log.info("Plugin registering", { dataDir, workspaceDir });
