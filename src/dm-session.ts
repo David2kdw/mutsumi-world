@@ -9,6 +9,7 @@ import { computeNPCStates } from "./npc-engine.js";
 import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules, loadScheduleTemplate, loadWeather } from "./data-loader.js";
 import { createLLMClient, type LLMClient, type DMSession, type DMResponse } from "./llm-client.js";
 import { createLogger, type Logger } from "./logger.js";
+import { saveDMSession, loadDMSession } from "./dm-store.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 function buildDMSystemPrompt(rules: RulesData, state: WorldState, npcs: NPCsData): string {
@@ -162,6 +163,25 @@ function applyDMResponse(state: WorldState, response: DMResponse, time: string):
 
 const TICK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
+/**
+ * 将 DM session 的完整历史保存到本地文件。
+ * 使用日期作为文件名，同一天多次保存自动覆盖。
+ */
+function saveDMSessionState(
+  dataDir: string,
+  date: string,
+  session: DMSession,
+  log: Logger,
+): void {
+  try {
+    const history = session.getHistory();
+    saveDMSession(dataDir, date, history);
+    log.debug(`DM session saved: ${date} (${history.length} messages)`);
+  } catch (err) {
+    log.warn(`Failed to save DM session: ${String(err)}`);
+  }
+}
+
 export async function recoverFromCrash(
   dataDir: string,
   locations: ReturnType<typeof loadLocations>,
@@ -300,6 +320,9 @@ export function startDMScheduler(
     state.last_tick = "07:00";
     writeWorld(dataDir, state);
 
+    // 保存 DM session 历史到本地
+    saveDMSessionState(dataDir, date, dmSession, log);
+
     log.info(`Morning routine complete. Weather: ${state._dm.weather}, Schedule: ${state._dm.schedule.length} segments`);
   }
 
@@ -358,6 +381,7 @@ export function startDMScheduler(
       const response = await dmSession.send(prompt);
       log.info(`Tick ${time} → ${response.environment || "(无声)"}${response.event ? ` [事件: ${response.event.name}]` : ""}`);
       applyDMResponse(state, response, time);
+      saveDMSessionState(dataDir, state.date, dmSession, log);
     }
 
     state.last_tick = time;
@@ -390,6 +414,20 @@ export function startDMScheduler(
       log.info(`World initialized: ${date} (${dayType}), weather: ${state._dm.weather}, at home`);
     } else {
       log.info(`Recovered from crash. Last tick was ${state.last_tick}`);
+
+      // 恢复 DM session 上下文（当天崩溃后重启时保留叙事连贯性）
+      if (state.date === getDate()) {
+        const archive = loadDMSession(dataDir, state.date);
+        if (archive && archive.history.length > 0) {
+          dmSession = llmClient.restoreDMSession(archive.history);
+          log.info(`DM session restored: ${archive.history.length} messages from ${archive.saved_at}`);
+        } else {
+          // 无存档 → 立刻创建新 session，不等明天早上
+          const sysPrompt = buildDMSystemPrompt(rules, state, npcs);
+          dmSession = llmClient.dmChat(sysPrompt);
+          log.info("DM session created mid-day (no archive found)");
+        }
+      }
     }
   })();
 
@@ -421,7 +459,6 @@ export function startDMScheduler(
       if (dmSession) dmSession.close();
     },
     async handleObserve(): Promise<string> {
-      // 由 tools.ts 调用
       const state = readWorld(dataDir);
       const time = getTime();
       const ctx = buildTickContext(state, time, locations, network, npcs);
@@ -431,13 +468,14 @@ export function startDMScheduler(
         applyDMResponse(state, response, time);
         state.last_tick = time;
         writeWorld(dataDir, state);
+        saveDMSessionState(dataDir, state.date, dmSession, log);
         log.info(`睦子米观察周围 → ${state._dm.environment}`);
         return state._dm.environment;
       }
+      log.info(`睦子米观察周围（无 DM） → ${state._dm.environment}`);
       return state._dm.environment;
     },
     async handleMoveTo(location: string, reason?: string): Promise<string> {
-      log.info(`睦子米主动移动到 ${location}${reason ? ` (${reason})` : ""}`);
       // 由 tools.ts 调用
       const state = readWorld(dataDir);
       const time = getTime();
@@ -466,6 +504,7 @@ export function startDMScheduler(
         const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米主动出发去" + location + "）";
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time);
+        saveDMSessionState(dataDir, state.date, dmSession, log);
       }
 
       state.last_tick = time;

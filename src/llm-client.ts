@@ -15,11 +15,20 @@ export interface DMResponse {
 
 export interface LLMClient {
   dmChat(systemPrompt: string): DMSession;
+  /** 从已保存的历史恢复 DM session（不重新发送系统提示词） */
+  restoreDMSession(history: DMSessionMessage[]): DMSession;
   complete(systemPrompt: string, userPrompt: string): Promise<string>;
+}
+
+export interface DMSessionMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
 }
 
 export interface DMSession {
   send(prompt: string): Promise<DMResponse>;
+  /** 返回完整的对话历史（含系统提示词），用于持久化保存 */
+  getHistory(): DMSessionMessage[];
   close(): void;
 }
 
@@ -27,11 +36,6 @@ export interface LLMConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
-}
-
-interface ChatMessage {
-  role: "system" | "user" | "assistant";
-  content: string;
 }
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -74,7 +78,7 @@ function parseJSONResponse(text: string): DMResponse {
  */
 async function chatCompletion(
   config: LLMConfig,
-  messages: ChatMessage[],
+  messages: DMSessionMessage[],
 ): Promise<string> {
   const url = `${config.baseUrl}/v1/chat/completions`;
 
@@ -122,9 +126,24 @@ export function createLLMClient(config?: Partial<LLMConfig>): LLMClient {
 
     return {
       dmChat(): DMSession {
+        const history: DMSessionMessage[] = [];
         return {
           async send(): Promise<DMResponse> {
             return { action: "none", environment: noopMsg };
+          },
+          getHistory(): DMSessionMessage[] {
+            return history;
+          },
+          close() {},
+        };
+      },
+      restoreDMSession(history: DMSessionMessage[]): DMSession {
+        return {
+          async send(): Promise<DMResponse> {
+            return { action: "none", environment: noopMsg };
+          },
+          getHistory(): DMSessionMessage[] {
+            return history;
           },
           close() {},
         };
@@ -137,7 +156,7 @@ export function createLLMClient(config?: Partial<LLMConfig>): LLMClient {
 
   return {
     dmChat(systemPrompt: string): DMSession {
-      const history: ChatMessage[] = [
+      const history: DMSessionMessage[] = [
         { role: "system", content: systemPrompt },
       ];
 
@@ -156,6 +175,10 @@ export function createLLMClient(config?: Partial<LLMConfig>): LLMClient {
           return parseJSONResponse(text);
         },
 
+        getHistory(): DMSessionMessage[] {
+          return history;
+        },
+
         close() {
           closed = true;
           history.length = 0;
@@ -163,8 +186,34 @@ export function createLLMClient(config?: Partial<LLMConfig>): LLMClient {
       };
     },
 
+    restoreDMSession(history: DMSessionMessage[]): DMSession {
+      let closed = false;
+
+      return {
+        async send(prompt: string): Promise<DMResponse> {
+          if (closed) throw new Error("DMSession is closed");
+
+          history.push({ role: "user", content: prompt });
+
+          const text = await chatCompletion(resolved, history);
+
+          history.push({ role: "assistant", content: text });
+
+          return parseJSONResponse(text);
+        },
+
+        getHistory(): DMSessionMessage[] {
+          return history;
+        },
+
+        close() {
+          closed = true;
+        },
+      };
+    },
+
     async complete(systemPrompt: string, userPrompt: string): Promise<string> {
-      const messages: ChatMessage[] = [
+      const messages: DMSessionMessage[] = [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ];

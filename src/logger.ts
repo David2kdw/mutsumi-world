@@ -11,7 +11,10 @@ export interface Logger {
 }
 
 function timestamp(): string {
-  return new Date().toISOString().replace("T", " ").slice(0, 19);
+  const d = new Date();
+  // 用本地时间，不用 toISOString（toISOString 返回 UTC，跟世界里的 HH:MM tick 时间对不上）
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
 function format(level: Level, msg: string, data?: unknown): string {

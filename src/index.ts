@@ -61,7 +61,7 @@ const plugin = {
     }
 
     // 注册工具（每次 agent session 都需要）
-    registerTools(api, _scheduler!, dataDir);
+    registerTools(api, _scheduler!, dataDir, log);
 
     log.info("Plugin registered successfully");
   },

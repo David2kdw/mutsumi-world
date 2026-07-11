@@ -3,6 +3,7 @@ import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { readWorld } from "./world-state.js";
 import { findCurrentSegment } from "./schedule-engine.js";
 import type { WorldState } from "./types.js";
+import type { Logger } from "./logger.js";
 
 function textResult(text: string) {
   return { content: [{ type: "text" as const, text }], details: undefined };
@@ -12,6 +13,7 @@ export function registerTools(
   api: OpenClawPluginApi,
   scheduler: ReturnType<typeof import("./dm-session.js").startDMScheduler>,
   dataDir: string,
+  log: Logger,
 ): void {
   // ====== world_status ======
   api.registerTool({
@@ -20,6 +22,7 @@ export function registerTools(
     description: "查看当前时间、位置、天气、今天发生了什么。当群友问「今天怎么样」「在哪」「做了什么」时先调用。",
     parameters: { type: "object", properties: {} },
     async execute() {
+      log.info("睦子米使用 world_status");
       let state: WorldState;
       try {
         state = readWorld(dataDir);
@@ -55,6 +58,7 @@ export function registerTools(
     description: "查看今天的课表或行程安排。当群友问「今天有什么课」「接下来去哪」时调用。",
     parameters: { type: "object", properties: {} },
     async execute() {
+      log.info("睦子米使用 check_schedule");
       let state: WorldState;
       try {
         state = readWorld(dataDir);
@@ -89,6 +93,7 @@ export function registerTools(
     description: "仔细观察周围的环境——看到了什么、听到了什么、闻到了什么。当群友问「周围有什么」「在干嘛」时调用。",
     parameters: { type: "object", properties: {} },
     async execute() {
+      log.info("睦子米观察周围");
       try {
         const env = await scheduler.handleObserve();
         const state = readWorld(dataDir);
@@ -124,6 +129,7 @@ export function registerTools(
     },
     async execute(_toolCallId, params) {
       const p = params as { location: string; reason?: string };
+      log.info(`睦子米移动到 ${p.location}${p.reason ? `（${p.reason}）` : ""}`);
       try {
         const result = await scheduler.handleMoveTo(p.location, p.reason);
         return textResult(result);

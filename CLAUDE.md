@@ -28,7 +28,8 @@ src/map-engine.ts     — Dijkstra shortest path on road network; coordinate int
 src/schedule-engine.ts — expands template + class_timetable → full daily segments; getDayType(); findCurrentSegment()
 src/npc-engine.ts     — computes NPC positions from schedules (location or traveling with progress)
 src/llm-client.ts     — DeepSeek API client (OpenAI-compatible /v1/chat/completions); dmChat() accumulates messages across ticks; complete() for one-shot (diary)
-src/dm-session.ts     — core engine: tick scheduler (10min, 07:00-23:00), morning routine, DM prompt builder, response handler, crash recovery
+src/dm-session.ts     — core engine: tick scheduler (10min, 07:00-23:00), morning routine, DM prompt builder, response handler, crash recovery, DM session save/restore
+src/dm-store.ts       — DM session history persistence: atomic save/load (JSON, .tmp→rename), per-date files
 src/tools.ts          — 4 OpenClaw tools: world_status, check_schedule, observe_surroundings, move_to
 src/diary.ts          — nightly diary via LLM; parses real OpenClaw trajectory.jsonl (prompt.submitted / model.completed entries); dual-writes to ~/.openclaw/workspace/memory/ + repo
 src/logger.ts         — file logger + forwards to OpenClaw logger
@@ -61,6 +62,7 @@ src/index.ts          — plugin entry: installDataFiles → startDMScheduler �
 ## Runtime Files (in repo root)
 
 - `world.json` — live simulation state
+- `dm-session-YYYY-MM-DD.json` — full DM chat history (system prompt + all tick prompts/responses); auto-saved after every tick/observe/move_to; restored on crash for narrative continuity
 - `mutsumi-world.log` — structured log (`[YYYY-MM-DD HH:MM:SS] LEVEL Message`)
 - `diaries/YYYY-MM-DD.md` — generated daily diaries
 
