@@ -117,9 +117,22 @@ export function createLLMClient(config?: Partial<LLMConfig>): LLMClient {
   const resolved = getConfig(config);
 
   if (!resolved.apiKey) {
-    throw new Error(
-      "LLMClient: 未找到 API key。请设置 DEEPSEEK_API_KEY 环境变量，或传入 config.apiKey。",
-    );
+    // 返回 no-op 客户端，插件不崩溃。LLM 依赖的功能返回占位响应。
+    const noopMsg = "（LLM 未配置：DEEPSEEK_API_KEY 环境变量未找到）";
+
+    return {
+      dmChat(): DMSession {
+        return {
+          async send(): Promise<DMResponse> {
+            return { action: "none", environment: noopMsg };
+          },
+          close() {},
+        };
+      },
+      async complete(): Promise<string> {
+        return noopMsg;
+      },
+    };
   }
 
   return {
