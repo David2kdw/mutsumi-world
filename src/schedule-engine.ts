@@ -46,7 +46,7 @@ export function expandSchedule(
   for (let i = 0; i < slotTimes.length; i++) {
     const time = slotTimes[i];
     const location = templateSlots[time];
-    const nextTime = slotTimes[i + 1] || "23:00";
+    const nextTime = slotTimes[i + 1] || "00:00";
     const startMin = timeToMinutes(time);
     const endMin = timeToMinutes(nextTime);
 
@@ -120,7 +120,7 @@ export function expandSchedule(
         start: time,
         end: nextTime,
         location,
-        activity: location === "家" ? (startMin >= 23 * 60 ? "睡眠" : "自由") : "自由",
+        activity: location === "家" ? (startMin < 7 * 60 ? "睡眠" : "自由") : "自由",
       });
     }
   }
@@ -138,7 +138,8 @@ export function findCurrentSegment(
   const tMin = timeToMinutes(time);
   for (const entry of schedule) {
     const sMin = timeToMinutes(entry.start);
-    const eMin = timeToMinutes(entry.end);
+    const eMinRaw = timeToMinutes(entry.end);
+    const eMin = eMinRaw === 0 ? 24 * 60 : eMinRaw; // "00:00" → 24:00
     // 跨午夜处理
     if (sMin <= eMin) {
       if (tMin >= sMin && tMin < eMin) return entry;

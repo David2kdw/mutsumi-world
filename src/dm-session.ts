@@ -10,6 +10,10 @@ import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules, loadSc
 import { createLLMClient, type LLMClient, type DMSession, type DMResponse } from "./llm-client.js";
 import { createLogger, type Logger } from "./logger.js";
 import { saveDMSession, loadDMSession } from "./dm-store.js";
+import { generateDiary } from "./diary.js";
+import { buildEventLookup, mergeEvent } from "./event-utils.js";
+import type { EventDef } from "./types.js";
+import * as path from "node:path";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 function buildDMSystemPrompt(rules: RulesData, state: WorldState, npcs: NPCsData): string {
@@ -47,13 +51,12 @@ ${npcIntro || "（暂无 NPC 数据）"}
   "environment": "新的环境描述（1-3句）",
   "move_to": "目标地点（仅当 action=move 时）",
   "departure_note": "出发轨迹说明（仅当 action=move 时）",
-  "event": { "id": "...", "name": "...", "location": "...", "status": "未处理" },
-  "event_note": "事件轨迹说明",
-  "resolve_event_id": "要移除的事件ID"
+  "event": { "id": "唯一标识，预定义事件用上方列表中的 id，自定义事件自己取一个唯一的", "name": "...", "type": "problem/encounter/ambient/event/custom", "description": "事件的一两句描述", "location": "...", "status": "未处理" },
+  "event_note": "仅当 event 不为 null 时填写，简短描述事件触发",
+  "resolve_event_id": "当睦子米已处理了某事件，且该事件的剧情已自然结束时，设为此事件的 id 来收束它。不要过早收束——给事件留出发酵的空间。"
 }
 
-如果没有事件，不编造。平淡的日子没关系。
-如果决定移动，给出理由。大部分日子不改日程。
+如果不想创建事件，event 和 event_note 都留 null。平淡的日子没关系。
 
 当写 NPC 偶遇叙事时，参考上方的 NPC 人物介绍，让对话和行为符合人设。`;
 }
@@ -71,7 +74,11 @@ ${posDesc}
 ${state._mutsumi.trajectory.map(t => `- ${t.time} ${t.note}`).join("\n")}
 
 活跃事件：
-${state._dm.active_events.map(e => `- ${e.name}（${e.status}，位置：${e.location}）`).join("\n") || "无"}
+${state._dm.active_events.map(e => {
+    let timeInfo = `${e.created_at} 开始`;
+    if (e.handled_at) timeInfo += `，${e.handled_at} 开始处理`;
+    return `- ${e.name} [id: ${e.id}]（${e.status}，位置：${e.location}，${timeInfo}）${e.description ? ` — ${e.description}` : ""}`;
+  }).join("\n") || "无"}
 `;
 
   if (ctx.current_segment) {
@@ -90,11 +97,10 @@ ${ctx.npc_states.map(n => {
 }).join("\n")}`;
   }
 
-  if (events) {
-    const locName = pos.type === "location" ? pos.name : pos.to;
-    const locEvents = events[locName];
+  if (events && pos.type === "location") {
+    const locEvents = events[pos.name];
     if (locEvents && locEvents.length > 0) {
-      prompt += `\n\n当前位置（${locName}）可能发生的事件：\n${locEvents.map(e => `- ${e.name}（${e.type}, 稀有度: ${e.rarity}）：${e.description}`).join("\n")}`;
+      prompt += `\n\n当前位置（${pos.name}）可能发生的事件：\n${locEvents.map(e => `- ${e.name} [id: ${e.id}]（${e.type}, 稀有度: ${e.rarity}）：${e.description}`).join("\n")}`;
     }
   }
 
@@ -128,7 +134,12 @@ function buildTickContext(
   };
 }
 
-function applyDMResponse(state: WorldState, response: DMResponse, time: string): void {
+function applyDMResponse(
+  state: WorldState,
+  response: DMResponse,
+  time: string,
+  eventLookup: Map<string, EventDef>,
+): void {
   // 更新环境
   if (response.environment) {
     state._dm.environment = response.environment;
@@ -144,11 +155,18 @@ function applyDMResponse(state: WorldState, response: DMResponse, time: string):
     // 实际的 traveling 状态由 tools.ts 的 move_to 或 tick 调度设置
   }
 
-  // 处理事件
+  // 叙事笔记（无论是否有事件都记入轨迹，但 prompt 要求 event 不为 null 才填）
+  if (response.event_note) {
+    appendTrajectory(state, { time, note: response.event_note });
+  }
+
+  // 处理事件：合并预定义数据，统一为完整 GameEvent
   if (response.event) {
-    state._dm.active_events.push(response.event);
-    if (response.event_note) {
-      appendTrajectory(state, { time, note: response.event_note });
+    const merged = mergeEvent(response.event, eventLookup);
+    merged.created_at = time;
+    const exists = state._dm.active_events.some(e => e.id === merged.id);
+    if (!exists) {
+      state._dm.active_events.push(merged);
     }
   }
 
@@ -255,7 +273,8 @@ export async function recoverFromCrash(
 export function startDMScheduler(
   api: OpenClawPluginApi,
   dataDir: string,
-): { stop: () => void; handleObserve: () => Promise<string>; handleMoveTo: (location: string, reason?: string) => Promise<string> } {
+  workspaceDir: string,
+): { stop: () => void; handleObserve: () => Promise<string>; handleMoveTo: (location: string, reason?: string) => Promise<string>; handleEvent: (eventId: string, action?: string) => Promise<string>; handleWorldStatus: () => Promise<string>; handleWriteDiary: () => Promise<string> } {
   const log: Logger = createLogger(dataDir, api.logger);
   log.info("DM scheduler starting", { dataDir });
 
@@ -265,11 +284,12 @@ export function startDMScheduler(
   const npcs = loadNPCs();
   const rules = loadRules();
   const events = loadEvents();
+  const eventLookup = buildEventLookup(events);
   const weather = loadWeather();
 
   let dmSession: DMSession | null = null;
   let timer: ReturnType<typeof setInterval> | null = null;
-  let morningTimer: ReturnType<typeof setTimeout> | null = null;
+  let midnightTimer: ReturnType<typeof setTimeout> | null = null;
   let diaryTimer: ReturnType<typeof setTimeout> | null = null;
 
   function getTime(): string {
@@ -281,49 +301,41 @@ export function startDMScheduler(
     return new Date().toISOString().slice(0, 10);
   }
 
-  async function morningRoutine(): Promise<void> {
+  /** 每日 00:00 例行：数据切换 + DM session 初始化 */
+  async function midnightRoutine(): Promise<void> {
     const date = getDate();
     const dayType = getDayType(date);
 
-    log.info(`Morning routine: ${date} (${dayType})`);
+    log.info(`Midnight routine: ${date} (${dayType})`);
 
-    // 读或创建 world.json
     let state: WorldState;
     try {
       state = readWorld(dataDir);
     } catch {
+      // 世界不存在 → 首次启动，创建
       state = createEmptyWorld(date, dayType);
     }
 
+    if (state.date === date) return; // 今天已经更新过
+
     state.date = date;
     state.day_type = dayType;
-
-    // 天气
     state._dm.weather = pickWeather();
 
-    // 展开日程
     const scheduleTemplate = loadScheduleTemplate();
     state._dm.schedule = expandSchedule(scheduleTemplate, date);
 
-    // 创建 DM session
+    // 新的一天，清空轨迹
+    state._mutsumi.trajectory = [];
+
+    // 创建新的 DM session
     if (dmSession) dmSession.close();
     const sysPrompt = buildDMSystemPrompt(rules, state, npcs);
     dmSession = llmClient.dmChat(sysPrompt);
 
-    // 晨间 tick
-    const ctx = buildTickContext(state, "07:00", locations, network, npcs);
-    const prompt = buildDMTickPrompt(state, ctx, events);
-    const response = await dmSession.send(prompt);
-    log.info(`DM morning → ${response.environment || "(无环境描述)"}`);
-
-    applyDMResponse(state, response, "07:00");
-    state.last_tick = "07:00";
     writeWorld(dataDir, state);
-
-    // 保存 DM session 历史到本地
     saveDMSessionState(dataDir, date, dmSession, log);
-
-    log.info(`Morning routine complete. Weather: ${state._dm.weather}, Schedule: ${state._dm.schedule.length} segments`);
+    log.info(`Midnight complete. Weather: ${state._dm.weather}, Schedule: ${state._dm.schedule.length} segments`);
   }
 
   async function tick(): Promise<void> {
@@ -380,7 +392,7 @@ export function startDMScheduler(
       const prompt = buildDMTickPrompt(state, ctx, events);
       const response = await dmSession.send(prompt);
       log.info(`Tick ${time} → ${response.environment || "(无声)"}${response.event ? ` [事件: ${response.event.name}]` : ""}`);
-      applyDMResponse(state, response, time);
+      applyDMResponse(state, response, time, eventLookup);
       saveDMSessionState(dataDir, state.date, dmSession, log);
     }
 
@@ -388,15 +400,15 @@ export function startDMScheduler(
     writeWorld(dataDir, state);
   }
 
-  // 每日 07:00 晨间 routine
-  function scheduleMorning() {
+  // 每日 00:00 午夜 routine
+  function scheduleMidnight() {
     const now = new Date();
-    const morning = new Date(now);
-    morning.setHours(7, 0, 0, 0);
-    if (now > morning) morning.setDate(morning.getDate() + 1);
-    const delay = morning.getTime() - now.getTime();
-    morningTimer = setTimeout(() => {
-      morningRoutine().then(() => scheduleMorning());
+    const midnight = new Date(now);
+    midnight.setHours(0, 0, 0, 0);
+    midnight.setDate(midnight.getDate() + 1);
+    const delay = midnight.getTime() - now.getTime();
+    midnightTimer = setTimeout(() => {
+      midnightRoutine().then(() => scheduleMidnight());
     }, delay);
   }
 
@@ -404,34 +416,28 @@ export function startDMScheduler(
   (async () => {
     let state = await recoverFromCrash(dataDir, locations, network, npcs);
     if (!state) {
-      // 没有 world.json（首次启动或非晨间时间）→ 创建初始世界，位置默认"家"
-      const date = getDate();
-      const dayType = getDayType(date);
-      state = createEmptyWorld(date, dayType);
-      state._dm.weather = pickWeather();
-      state._dm.schedule = expandSchedule(loadScheduleTemplate(), date);
-      writeWorld(dataDir, state);
-      log.info(`World initialized: ${date} (${dayType}), weather: ${state._dm.weather}, at home`);
+      // 没有 world.json → 初始化世界
+      await midnightRoutine();
     } else {
       log.info(`Recovered from crash. Last tick was ${state.last_tick}`);
 
-      // 恢复 DM session 上下文（当天崩溃后重启时保留叙事连贯性）
       if (state.date === getDate()) {
+        // 当天：恢复 DM session
         const archive = loadDMSession(dataDir, state.date);
         if (archive && archive.history.length > 0) {
           dmSession = llmClient.restoreDMSession(archive.history);
           log.info(`DM session restored: ${archive.history.length} messages from ${archive.saved_at}`);
         } else {
-          // 无存档 → 立刻创建新 session，不等明天早上
-          const sysPrompt = buildDMSystemPrompt(rules, state, npcs);
-          dmSession = llmClient.dmChat(sysPrompt);
-          log.info("DM session created mid-day (no archive found)");
+          await midnightRoutine();
         }
+      } else {
+        // 跨天了：直接跑午夜 routine
+        await midnightRoutine();
       }
     }
   })();
 
-  scheduleMorning();
+  scheduleMidnight();
   timer = setInterval(tick, TICK_INTERVAL_MS);
 
   function pickWeather(): string {
@@ -454,7 +460,7 @@ export function startDMScheduler(
     stop() {
       log.info("DM scheduler stopping");
       if (timer) clearInterval(timer);
-      if (morningTimer) clearTimeout(morningTimer);
+      if (midnightTimer) clearTimeout(midnightTimer);
       if (diaryTimer) clearTimeout(diaryTimer);
       if (dmSession) dmSession.close();
     },
@@ -465,14 +471,12 @@ export function startDMScheduler(
       if (dmSession) {
         const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米刚才观察了周围）";
         const response = await dmSession.send(prompt);
-        applyDMResponse(state, response, time);
+        applyDMResponse(state, response, time, eventLookup);
         state.last_tick = time;
         writeWorld(dataDir, state);
         saveDMSessionState(dataDir, state.date, dmSession, log);
-        log.info(`睦子米观察周围 → ${state._dm.environment}`);
         return state._dm.environment;
       }
-      log.info(`睦子米观察周围（无 DM） → ${state._dm.environment}`);
       return state._dm.environment;
     },
     async handleMoveTo(location: string, reason?: string): Promise<string> {
@@ -500,17 +504,99 @@ export function startDMScheduler(
       });
 
       if (dmSession) {
-        const ctx = buildTickContext(state, time, locations, network, npcs);
-        const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米主动出发去" + location + "）";
+        const prompt = `当前时间：${time}。睦子米刚从${currentLoc}出发去${location}${reason ? `（${reason}）` : ""}。请描述她动身离开${currentLoc}时的场景。不要描述目的地——她还没到。`;
         const response = await dmSession.send(prompt);
-        applyDMResponse(state, response, time);
+        applyDMResponse(state, response, time, eventLookup);
         saveDMSessionState(dataDir, state.date, dmSession, log);
       }
 
       state.last_tick = time;
       writeWorld(dataDir, state);
 
-      return `出发去${location}。${state._dm.environment || ""}`;
+      const minutes = Math.round(route.estimatedMinutes);
+      return `正在从${currentLoc}去${location}的路上。步行约${minutes}分钟。`;
+    },
+    async handleEvent(eventId: string, action?: string): Promise<string> {
+      const state = readWorld(dataDir);
+      const time = getTime();
+
+      const event = state._dm.active_events.find(e => e.id === eventId);
+      if (!event) return `事件 ${eventId} 不存在或已结束。`;
+
+      const alreadyHandling = event.status === "处理中";
+
+      if (!alreadyHandling) {
+        // 首次处理：标记状态，记轨迹
+        event.status = "处理中";
+        event.handled_at = time;
+        const note = action
+          ? `开始处理事件「${event.name}」：${action}`
+          : `开始处理事件「${event.name}」`;
+        appendTrajectory(state, { time, note });
+      }
+
+      // 通知 DM，并处理 DM 的响应（可能含环境更新或收束决定）
+      if (dmSession) {
+        const dmPrompt = alreadyHandling
+          ? `（睦子米继续处理事件「${event.name}」${action ? `：${action}` : ""}。）`
+          : `（睦子米开始处理事件「${event.name}」${action ? `：${action}` : ""}。请在合适的时机收束此事件。）`;
+        const response = await dmSession.send(dmPrompt);
+        applyDMResponse(state, response, time, eventLookup);
+        saveDMSessionState(dataDir, state.date, dmSession, log);
+      }
+
+      state.last_tick = time;
+      writeWorld(dataDir, state);
+
+      const hint = event.resolve_hint ? `（提示：${event.resolve_hint}）` : "";
+      return alreadyHandling
+        ? `继续处理事件「${event.name}」。${hint}`
+        : `开始处理事件「${event.name}」。${hint}`;
+    },
+    async handleWorldStatus(): Promise<string> {
+      // 先触发一次 DM tick 刷新世界状态
+      const state = readWorld(dataDir);
+      const time = getTime();
+      const ctx = buildTickContext(state, time, locations, network, npcs);
+      if (dmSession) {
+        const prompt = buildDMTickPrompt(state, ctx, events);
+        const response = await dmSession.send(prompt);
+        applyDMResponse(state, response, time, eventLookup);
+        state.last_tick = time;
+        writeWorld(dataDir, state);
+        saveDMSessionState(dataDir, state.date, dmSession, log);
+        log.info(`world_status DM tick → ${response.environment || "(无声)"}`);
+      }
+
+      // 构建状态字符串
+      const pos = state._mutsumi.position;
+      const posDesc = pos.type === "location"
+        ? pos.name
+        : `正在从${pos.from}去${pos.to}的路上`;
+
+      const trajSummary = state._mutsumi.trajectory.length > 0
+        ? state._mutsumi.trajectory.map(t => `${t.time} ${t.note}`).join("；")
+        : "今天还没有记录。";
+
+      const eventsSummary = state._dm.active_events.length > 0
+        ? state._dm.active_events.map(e => `${e.name}(id:${e.id}) — ${e.description}`).join("、")
+        : "";
+
+      const now = new Date();
+      const dayNames = ["日", "一", "二", "三", "四", "五", "六"];
+
+      return (
+        `${now.getMonth() + 1}月${now.getDate()}日 星期${dayNames[now.getDay()]}。` +
+        `天气${state._dm.weather}。` +
+        `位置：${posDesc}。` +
+        `今天：${trajSummary}` +
+        (eventsSummary ? `\n活跃事件：${eventsSummary}` : "")
+      );
+    },
+    async handleWriteDiary(): Promise<string> {
+      const soulPath = path.join(workspaceDir, "SOUL.md");
+      await generateDiary(dataDir, workspaceDir, llmClient, soulPath);
+      return "日记已写完。";
     },
   };
 }

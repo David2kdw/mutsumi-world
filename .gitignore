@@ -3,5 +3,5 @@ dist/
 world.json
 mutsumi-world.log
 diaries/
-dm-session-*.json
+dm-sessions/
 preload-probe.txt

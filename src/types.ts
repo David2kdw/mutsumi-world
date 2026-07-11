@@ -12,7 +12,7 @@ export interface DMState {
   weather: string;
   schedule: ScheduleEntry[];
   environment: string;
-  active_events: ActiveEvent[];
+  active_events: GameEvent[];
 }
 
 export interface ScheduleEntry {
@@ -22,11 +22,22 @@ export interface ScheduleEntry {
   activity: string;
 }
 
-export interface ActiveEvent {
+export interface GameEvent {
   id: string;
   name: string;
+  type: string;         // "problem" | "encounter" | "ambient" | "event" | "custom"
+  rarity: string;       // "common" | "uncommon" | "rare" | "custom"
+  description: string;
   location: string;
-  status: string;
+  status: string;       // "未处理" | "处理中" | ...
+  created_at: string;   // "HH:MM" — 事件创建时间
+  handled_at?: string;  // "HH:MM" — 睦子米开始处理的时间
+  tags?: string[];
+  resolve_hint?: string;
+  npc_optional?: string;
+  npc_required?: string[];
+  condition?: string;
+  season?: string;
 }
 
 export interface MutsumiState {

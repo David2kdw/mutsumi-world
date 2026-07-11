@@ -4,8 +4,17 @@ export interface DMResponse {
   event?: {
     id: string;
     name: string;
+    type?: string;
+    rarity?: string;
+    description?: string;
     location: string;
     status: string;
+    tags?: string[];
+    resolve_hint?: string;
+    npc_optional?: string;
+    npc_required?: string[];
+    condition?: string;
+    season?: string;
   };
   event_note?: string;
   resolve_event_id?: string;

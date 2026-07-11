@@ -11,7 +11,9 @@
       "world_status",
       "check_schedule",
       "observe_surroundings",
-      "move_to"
+      "move_to",
+      "handle_event",
+      "write_diary"
     ]
   },
   "configSchema": {},

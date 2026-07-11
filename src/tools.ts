@@ -23,31 +23,14 @@ export function registerTools(
     parameters: { type: "object", properties: {} },
     async execute() {
       log.info("睦子米使用 world_status");
-      let state: WorldState;
       try {
-        state = readWorld(dataDir);
+        // 先触发 DM tick 刷新世界，再返回状态
+        const result = await scheduler.handleWorldStatus();
+        log.info(`睦子米 world_status → ${result}`);
+        return textResult(result);
       } catch {
         return textResult("世界尚未启动。");
       }
-
-      const pos = state._mutsumi.position;
-      const posDesc = pos.type === "location"
-        ? pos.name
-        : `正在从${pos.from}去${pos.to}的路上`;
-
-      const trajSummary = state._mutsumi.trajectory.length > 0
-        ? state._mutsumi.trajectory.map(t => `${t.time} ${t.note}`).join("；")
-        : "今天还没有记录。";
-
-      const now = new Date();
-      const dayNames = ["日", "一", "二", "三", "四", "五", "六"];
-
-      return textResult(
-        `${now.getMonth() + 1}月${now.getDate()}日 星期${dayNames[now.getDay()]}。` +
-        `天气${state._dm.weather}。` +
-        `位置：${posDesc}。` +
-        `今天：${trajSummary}`
-      );
     },
   });
 
@@ -82,7 +65,9 @@ export function registerTools(
         text += `接下来：${upcoming.map(s => `${s.start} ${s.location} | ${s.activity}`).join("；")}`;
       }
 
-      return textResult(text || "今天的日程结束了。");
+      const result = text || "今天的日程结束了。";
+      log.info(`睦子米 check_schedule → ${result}`);
+      return textResult(result);
     },
   });
 
@@ -97,10 +82,16 @@ export function registerTools(
       try {
         const env = await scheduler.handleObserve();
         const state = readWorld(dataDir);
+        // 活跃事件自带完整数据，不需要扫描 events.json
         const events = state._dm.active_events
-          .map(e => `【${e.name}】${e.location} | ${e.status}`)
+          .map(e => {
+            const hint = e.resolve_hint ? ` [提示: ${e.resolve_hint}]` : "";
+            return `【${e.name}】(id: ${e.id}) ${e.location} | ${e.status} — ${e.description}${hint}`;
+          })
           .join("；");
-        return textResult(env + (events ? `\n附近的事件：${events}` : ""));
+        const full = env + (events ? `\n附近的事件：${events}` : "");
+        log.info(`睦子米观察周围 → ${full}`);
+        return textResult(full);
       } catch {
         return textResult("看不到周围。");
       }
@@ -132,6 +123,7 @@ export function registerTools(
       log.info(`睦子米移动到 ${p.location}${p.reason ? `（${p.reason}）` : ""}`);
       try {
         const result = await scheduler.handleMoveTo(p.location, p.reason);
+        log.info(`睦子米 move_to → ${result}`);
         return textResult(result);
       } catch (err) {
         return textResult(`没法去${p.location}。${err instanceof Error ? err.message : ""}`);
@@ -139,5 +131,55 @@ export function registerTools(
     },
   });
 
-  api.logger?.info?.("[mutsumi-world] 4 tools registered");
+  // ====== handle_event ======
+  api.registerTool({
+    name: "handle_event",
+    label: "处理事件",
+    description: "主动处理或回应一个事件——读纸条、回复消息、捡东西、回应NPC等。当睦子米想对某个活跃事件做出反应时调用。",
+    parameters: {
+      type: "object",
+      properties: {
+        event_id: {
+          type: "string",
+          description: "事件ID（从 observe_surroundings 或 world_status 中获取）",
+        },
+        action: {
+          type: "string",
+          description: "你怎么处理这个事件（可选）",
+        },
+      },
+      required: ["event_id"],
+    },
+    async execute(_toolCallId, params) {
+      const p = params as { event_id: string; action?: string };
+      log.info(`睦子米处理事件: ${p.event_id}${p.action ? ` — ${p.action}` : ""}`);
+      try {
+        const result = await scheduler.handleEvent(p.event_id, p.action);
+        log.info(`睦子米 handle_event → ${result}`);
+        return textResult(result);
+      } catch (err) {
+        return textResult(`处理事件失败。${err instanceof Error ? err.message : ""}`);
+      }
+    },
+  });
+
+  // ====== write_diary ======
+  api.registerTool({
+    name: "write_diary",
+    label: "写日记",
+    description: "现在写今天的日记。如果今天已经写过，会覆盖。当群友说「写日记」「记一下」或者你想记录今天时调用。",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      log.info("睦子米手动写日记");
+      try {
+        const result = await scheduler.handleWriteDiary();
+        log.info(`睦子米 write_diary → ${result}`);
+        return textResult(result);
+      } catch (err) {
+        return textResult(`写日记失败。${err instanceof Error ? err.message : ""}`);
+      }
+    },
+  });
+
+  api.logger?.info?.("[mutsumi-world] 6 tools registered");
 }

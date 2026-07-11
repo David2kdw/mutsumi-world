@@ -35,7 +35,7 @@ const plugin = {
     // 调度器和日记定时器只启动一次，但工具每次 register 都要注册
     if (!_started) {
       _started = true;
-      _scheduler = startDMScheduler(api, dataDir);
+      _scheduler = startDMScheduler(api, dataDir, workspaceDir);
 
       // 23:30 日记定时器
       function scheduleDiary() {

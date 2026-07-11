@@ -10,23 +10,28 @@ function localTimestamp(): string {
 
 /**
  * DM session 历史存档格式。
- * 与 world.json 放在同一 dataDir 下，按日期分文件。
+ * 保存在 dataDir/dm-sessions/ 子目录下，按日期分文件。
  */
 export interface DMSessionArchive {
   date: string;                        // "YYYY-MM-DD"
-  saved_at: string;                    // ISO timestamp of last save
+  saved_at: string;                    // local timestamp of last save
   history: DMSessionMessage[];         // full chat history (system + user + assistant)
 }
 
+const SESSIONS_DIR = "dm-sessions";
 const SESSION_PREFIX = "dm-session-";
 const SESSION_TMP_PREFIX = ".dm-session-";
 
+function sessionsDir(dataDir: string): string {
+  return path.join(dataDir, SESSIONS_DIR);
+}
+
 function sessionPath(dataDir: string, date: string): string {
-  return path.join(dataDir, `${SESSION_PREFIX}${date}.json`);
+  return path.join(sessionsDir(dataDir), `${SESSION_PREFIX}${date}.json`);
 }
 
 function sessionTmpPath(dataDir: string, date: string): string {
-  return path.join(dataDir, `${SESSION_TMP_PREFIX}${date}.json.tmp`);
+  return path.join(sessionsDir(dataDir), `${SESSION_TMP_PREFIX}${date}.json.tmp`);
 }
 
 /**
@@ -48,6 +53,7 @@ export function saveDMSession(
   };
 
   const json = JSON.stringify(archive, null, 2);
+  fs.mkdirSync(sessionsDir(dataDir), { recursive: true });
   fs.writeFileSync(tmpPath, json, "utf-8");
   fs.renameSync(tmpPath, destPath);
 }
@@ -86,7 +92,8 @@ export function deleteDMSession(dataDir: string, date: string): void {
 export function listDMSessions(dataDir: string): string[] {
   const dates: string[] = [];
   try {
-    const entries = fs.readdirSync(dataDir, { withFileTypes: true });
+    const dir = sessionsDir(dataDir);
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isFile()) continue;
       const match = entry.name.match(/^dm-session-(\d{4}-\d{2}-\d{2})\.json$/);
