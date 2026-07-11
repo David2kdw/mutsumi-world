@@ -222,8 +222,8 @@ export async function recoverFromCrash(
   const nowTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   const [lastH, lastM] = state.last_tick.split(":").map(Number);
   const [nowH, nowM] = nowTime.split(":").map(Number);
-  const gapMs = ((nowH * 60 + nowM) - (lastH * 60 + lastM)) * 60 * 1000;
-
+  let gapMs = ((nowH * 60 + nowM) - (lastH * 60 + lastM)) * 60 * 1000;
+  if (gapMs < 0) gapMs += 24 * 60 * 60 * 1000; // 跨午夜
   if (gapMs <= 0) return state; // 没有缺口
 
   // 推进 traveling 中的坐标
@@ -360,7 +360,8 @@ export function startDMScheduler(
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
     const [lastH, lastM] = (state.last_tick || "00:00").split(":").map(Number);
     const lastMinutes = lastH * 60 + lastM;
-    const gapMs = (nowMinutes - lastMinutes) * 60 * 1000;
+    let gapMs = (nowMinutes - lastMinutes) * 60 * 1000;
+    if (gapMs < 0) gapMs += 24 * 60 * 60 * 1000; // 跨午夜
     if (gapMs <= 0) return;
 
     const route = state._mutsumi.position.route;
