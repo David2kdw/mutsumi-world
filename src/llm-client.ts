@@ -35,7 +35,7 @@ interface ChatMessage {
 }
 
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
-const DEFAULT_MODEL = "deepseek-chat";
+const DEFAULT_MODEL = "deepseek-v4-flash";
 
 function getConfig(overrides?: Partial<LLMConfig>): LLMConfig {
   return {
