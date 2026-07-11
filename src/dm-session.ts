@@ -218,12 +218,13 @@ export async function recoverFromCrash(
     }
   }
 
-  // 检查日程边界（如果跨过了多个日程段，补上轨迹）
-  // 简化处理：补一条"世界恢复运行"
-  appendTrajectory(state, {
-    time: nowTime,
-    note: `世界恢复运行（上次 tick: ${state.last_tick}）`,
-  });
+  // 只有显著缺口（>15min）才记录恢复轨迹，短间隙是正常重启
+  if (gapMs > 15 * 60 * 1000) {
+    appendTrajectory(state, {
+      time: nowTime,
+      note: `世界恢复运行（上次 tick: ${state.last_tick}）`,
+    });
+  }
 
   state.last_tick = nowTime;
   writeWorld(dataDir, state);
@@ -293,7 +294,7 @@ export function startDMScheduler(
     const ctx = buildTickContext(state, "07:00", locations, network, npcs);
     const prompt = buildDMTickPrompt(state, ctx, events);
     const response = await dmSession.send(prompt);
-    log.debug("DM morning response", { response });
+    log.info(`DM morning → ${response.environment || "(无环境描述)"}`);
 
     applyDMResponse(state, response, "07:00");
     state.last_tick = "07:00";
@@ -355,7 +356,7 @@ export function startDMScheduler(
     if (dmSession) {
       const prompt = buildDMTickPrompt(state, ctx, events);
       const response = await dmSession.send(prompt);
-      log.debug(`Tick ${time} DM response`, { action: response.action, hasEvent: !!response.event });
+      log.info(`Tick ${time} → ${response.environment || "(无声)"}${response.event ? ` [事件: ${response.event.name}]` : ""}`);
       applyDMResponse(state, response, time);
     }
 
@@ -420,7 +421,6 @@ export function startDMScheduler(
       if (dmSession) dmSession.close();
     },
     async handleObserve(): Promise<string> {
-      log.debug("睦子米观察周围");
       // 由 tools.ts 调用
       const state = readWorld(dataDir);
       const time = getTime();
@@ -431,6 +431,7 @@ export function startDMScheduler(
         applyDMResponse(state, response, time);
         state.last_tick = time;
         writeWorld(dataDir, state);
+        log.info(`睦子米观察周围 → ${state._dm.environment}`);
         return state._dm.environment;
       }
       return state._dm.environment;
