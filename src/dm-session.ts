@@ -53,7 +53,7 @@ ${npcIntro || "（暂无 NPC 数据）"}
   "departure_note": "出发轨迹说明（仅当 action=move 时）",
   "event": { "id": "唯一标识，预定义事件用上方列表中的 id，自定义事件自己取一个唯一的", "name": "...", "type": "problem/encounter/ambient/event/custom", "description": "事件的一两句描述", "location": "...", "status": "未处理" },
   "event_note": "仅当 event 不为 null 时填写，简短描述事件触发",
-  "resolve_event_id": "当睦子米已处理了某事件，且该事件的剧情已自然结束时，设为此事件的 id 来收束它。不要过早收束——给事件留出发酵的空间。"
+  "resolve_event_id": "当睦子米已处理了某事件，且该事件的剧情已自然结束时，设为此事件的 id 来收束它。不要在收到睦子米的处理消息后立刻收束——让互动有来有回，至少等一个 tick 周期再收束。"
 }
 
 如果不想创建事件，event 和 event_note 都留 null。平淡的日子没关系。
@@ -164,8 +164,11 @@ function applyDMResponse(
   if (response.event) {
     const merged = mergeEvent(response.event, eventLookup);
     merged.created_at = time;
-    const exists = state._dm.active_events.some(e => e.id === merged.id);
-    if (!exists) {
+    const existing = state._dm.active_events.find(e => e.id === merged.id);
+    if (existing) {
+      // DM 更新了已有事件（补充描述、推进状态等）→ 合并
+      Object.assign(existing, merged);
+    } else {
       state._dm.active_events.push(merged);
     }
   }
@@ -349,6 +352,39 @@ export function startDMScheduler(
     log.info(`Midnight complete. Weather: ${state._dm.weather}, Schedule: ${state._dm.schedule.length} segments`);
   }
 
+  /** 推进 traveling 位置——每次读 world 后调用，确保位置随时间更新。 */
+  function advanceTravelingIfNeeded(state: WorldState): void {
+    if (state._mutsumi.position.type !== "traveling") return;
+
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const [lastH, lastM] = (state.last_tick || "00:00").split(":").map(Number);
+    const lastMinutes = lastH * 60 + lastM;
+    const gapMs = (nowMinutes - lastMinutes) * 60 * 1000;
+    if (gapMs <= 0) return;
+
+    const route = state._mutsumi.position.route;
+    let totalDist = 0;
+    const nodeMap = new Map(network.nodes.map(n => [n.id, n.coord]));
+    for (let i = 1; i < route.length; i++) {
+      const fromCoord = nodeMap.get(route[i - 1])!;
+      const toCoord = nodeMap.get(route[i])!;
+      totalDist += Math.sqrt((toCoord.x - fromCoord.x) ** 2 + (toCoord.y - fromCoord.y) ** 2);
+    }
+
+    const { progress, arrived } = advanceTraveling(
+      state._mutsumi.position, gapMs, 1.2, totalDist,
+    );
+
+    state._mutsumi.position.progress = progress;
+    if (arrived) {
+      const time = getTime();
+      log.info(`Arrived at ${state._mutsumi.position.to}`);
+      appendTrajectory(state, { time, note: `到达${state._mutsumi.position.to}` });
+      state._mutsumi.position = { type: "location", name: state._mutsumi.position.to };
+    }
+  }
+
   async function tick(): Promise<void> {
     const time = getTime();
     const hour = new Date().getHours();
@@ -364,38 +400,7 @@ export function startDMScheduler(
       return;
     }
 
-    // 推进 traveling
-    if (state._mutsumi.position.type === "traveling") {
-      // 计算路线总距离
-      const route = state._mutsumi.position.route;
-      let totalDist = 0;
-      const nodeMap = new Map(network.nodes.map(n => [n.id, n.coord]));
-      for (let i = 1; i < route.length; i++) {
-        const fromCoord = nodeMap.get(route[i - 1])!;
-        const toCoord = nodeMap.get(route[i])!;
-        totalDist += Math.sqrt((toCoord.x - fromCoord.x) ** 2 + (toCoord.y - fromCoord.y) ** 2);
-      }
-
-      const { progress, arrived } = advanceTraveling(
-        state._mutsumi.position,
-        TICK_INTERVAL_MS,
-        1.2,
-        totalDist,
-      );
-
-      state._mutsumi.position.progress = progress;
-      if (arrived) {
-        log.info(`Arrived at ${state._mutsumi.position.to}`);
-        appendTrajectory(state, {
-          time,
-          note: `到达${state._mutsumi.position.to}`,
-        });
-        state._mutsumi.position = {
-          type: "location",
-          name: state._mutsumi.position.to,
-        };
-      }
-    }
+    advanceTravelingIfNeeded(state);
 
     const ctx = buildTickContext(state, time, locations, network, npcs);
 
@@ -477,6 +482,7 @@ export function startDMScheduler(
     },
     async handleObserve(): Promise<string> {
       const state = readWorld(dataDir);
+      advanceTravelingIfNeeded(state);
       const time = getTime();
       const ctx = buildTickContext(state, time, locations, network, npcs);
       if (dmSession) {
@@ -529,6 +535,7 @@ export function startDMScheduler(
     },
     async handleEvent(eventId: string, action?: string): Promise<string> {
       const state = readWorld(dataDir);
+      advanceTravelingIfNeeded(state);
       const time = getTime();
 
       const event = state._dm.active_events.find(e => e.id === eventId);
@@ -547,6 +554,7 @@ export function startDMScheduler(
       }
 
       // 通知 DM，并处理 DM 的响应（可能含环境更新或收束决定）
+      let dmNarrative = "";
       if (dmSession) {
         const dmPrompt = alreadyHandling
           ? `（睦子米继续处理事件「${event.name}」${action ? `：${action}` : ""}。）`
@@ -554,19 +562,19 @@ export function startDMScheduler(
         const response = await dmSession.send(dmPrompt);
         applyDMResponse(state, response, time, eventLookup);
         saveDMSessionState(dataDir, state.date, dmSession, log);
+        dmNarrative = response.environment ? ` — ${response.environment}` : "";
       }
 
       state.last_tick = time;
       writeWorld(dataDir, state);
 
-      const hint = event.resolve_hint ? `（提示：${event.resolve_hint}）` : "";
-      return alreadyHandling
-        ? `继续处理事件「${event.name}」。${hint}`
-        : `开始处理事件「${event.name}」。${hint}`;
+      const prefix = alreadyHandling ? `继续处理「${event.name}」` : `处理「${event.name}」`;
+      return `${prefix}${dmNarrative}`;
     },
     async handleWorldStatus(): Promise<string> {
-      // 先触发一次 DM tick 刷新世界状态
       const state = readWorld(dataDir);
+      advanceTravelingIfNeeded(state);
+      // 先触发一次 DM tick 刷新世界状态
       const time = getTime();
       const ctx = buildTickContext(state, time, locations, network, npcs);
       if (dmSession) {
