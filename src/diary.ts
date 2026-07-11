@@ -1,21 +1,19 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { readWorld } from "./world-state.js";
+import * as os from "node:os";
+import { readWorld, writeWorld } from "./world-state.js";
 import type { LLMClient } from "./llm-client.js";
 import type { WorldState } from "./types.js";
 
 /**
- * 从所有 trajectory.jsonl 中解析当天的用户和助手消息。
+ * 从 OpenClaw 的 trajectory.jsonl 文件中解析当天的用户和助手消息。
  *
  * OpenClaw 会定期 reset/compact session——旧 session 保存为 .jsonl.reset.<timestamp>，
- * 新 session 从零开始。只看最新一个 session 会漏掉当天 reset 之前的消息和昨天的消息。
- * 所以这里扫描 sessions 目录下所有 .trajectory.jsonl 文件（包括 reset 前的），
- * 按 timestamp 过滤出目标日期的消息。
+ * 新 session 从零开始。这里扫描 sessions 目录下所有 .trajectory.jsonl 和 .jsonl.reset.* 文件，
+ * 按 ts 时间戳过滤出目标日期的消息。
  */
-function parseDailyChatLog(
-  sessionsDir: string,
-  dateStr: string,
-): string {
+function parseDailyChatLog(dateStr: string): string {
+  const sessionsDir = path.join(os.homedir(), ".openclaw", "agents", "main", "sessions");
   const allLines: string[] = [];
 
   try {
@@ -27,61 +25,61 @@ function parseDailyChatLog(
       try {
         const content = fs.readFileSync(filePath, "utf-8");
         allLines.push(...content.split("\n").filter(Boolean));
-      } catch {
-        // 跳过无法读取的文件
-      }
+      } catch { /* skip */ }
     }
 
-    // 也扫描 reset 备份文件（<uuid>.jsonl.reset.<timestamp>）
-    // 这些文件本身是 JSONL 格式，包含被 reset 的 session 的消息
+    // 也扫描 reset 备份（<uuid>.jsonl.reset.<timestamp>）
     const resetFiles = files.filter(f => f.includes(".jsonl.reset."));
     for (const f of resetFiles) {
       const filePath = path.join(sessionsDir, f);
       try {
         const content = fs.readFileSync(filePath, "utf-8");
         allLines.push(...content.split("\n").filter(Boolean));
-      } catch {
-        // 跳过
-      }
+      } catch { /* skip */ }
     }
   } catch {
     return "";
   }
 
   if (allLines.length === 0) return "";
-  const chatLines: string[] = [];
+
+  const userMessages: string[] = [];
+  const assistantMessages: string[] = [];
 
   for (const line of allLines) {
     try {
       const entry = JSON.parse(line);
-      if (entry.type !== "message") continue;
-      if (!entry.message?.content) continue;
 
       // 检查时间戳是否在当天
-      const ts = entry.timestamp || entry.message?.timestamp;
-      if (!ts) continue;
-      const entryDate = new Date(ts).toISOString().slice(0, 10);
+      if (!entry.ts) continue;
+      const entryDate = new Date(entry.ts).toISOString().slice(0, 10);
       if (entryDate !== dateStr) continue;
 
-      const msg = entry.message;
-      if (msg.role === "user") {
-        const content = typeof msg.content === "string"
-          ? msg.content
-          : Array.isArray(msg.content)
-            ? msg.content.find((c: any) => c.type === "text")?.text || ""
-            : "";
-        // 清理 QQ 格式
-        const cleaned = content.replace(/\[.*?\]\s*/, "").replace(/\(@你\)/, "").trim();
-        if (cleaned) chatLines.push(`群友: ${cleaned}`);
-      } else if (msg.role === "assistant") {
-        const content = Array.isArray(msg.content)
-          ? msg.content.filter((c: any) => c.type === "text").map((c: any) => c.text).join("")
-          : msg.content || "";
-        if (content.trim()) chatLines.push(`睦: ${content.trim()}`);
+      if (entry.type === "prompt.submitted") {
+        // 用户输入
+        const promptText = entry.data?.prompt;
+        if (promptText && typeof promptText === "string") {
+          // 清理 QQ 格式: [xxx] 前缀、(@你) 标记
+          const cleaned = promptText.replace(/\[.*?\]\s*/, "").replace(/\(@你\)/, "").trim();
+          if (cleaned) userMessages.push(`群友: ${cleaned}`);
+        }
+      } else if (entry.type === "model.completed") {
+        // 助手回复
+        const texts = entry.data?.assistantTexts;
+        if (Array.isArray(texts) && texts.length > 0) {
+          const content = texts.join("").trim();
+          if (content) assistantMessages.push(`睦: ${content}`);
+        }
       }
-    } catch {
-      // skip malformed lines
-    }
+    } catch { /* skip malformed */ }
+  }
+
+  // 交错输出用户消息和助手消息
+  const chatLines: string[] = [];
+  const maxLines = Math.max(userMessages.length, assistantMessages.length);
+  for (let i = 0; i < maxLines; i++) {
+    if (i < userMessages.length) chatLines.push(userMessages[i]);
+    if (i < assistantMessages.length) chatLines.push(assistantMessages[i]);
   }
 
   return chatLines.join("\n");
@@ -103,12 +101,7 @@ export async function generateDiary(
   const trajectory = state._mutsumi.trajectory;
   if (trajectory.length === 0) return;
 
-  const sessionsDir = path.join(
-    path.dirname(workspaceDir),
-    "agents", "main", "sessions",
-  );
-
-  const chatLog = parseDailyChatLog(sessionsDir, state.date);
+  const chatLog = parseDailyChatLog(state.date);
 
   const systemPrompt = fs.readFileSync(soulPath, "utf-8");
   const userPrompt = `今天结束了。请以若叶睦的口吻写一篇简短日记。
@@ -149,6 +142,5 @@ ${diary}
 
   // 清空轨迹
   state._mutsumi.trajectory = [];
-  const { writeWorld } = await import("./world-state.js");
   writeWorld(dataDir, state);
 }
