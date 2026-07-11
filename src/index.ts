@@ -5,6 +5,7 @@ import { startDMScheduler } from "./dm-session.js";
 import { registerTools } from "./tools.js";
 import { generateDiary } from "./diary.js";
 import { createLLMClient } from "./llm-client.js";
+import { createLogger } from "./logger.js";
 import * as path from "node:path";
 
 function getDataDir(runtime: PluginRuntime): string | undefined {
@@ -20,6 +21,9 @@ const plugin = {
     const baseDir = getDataDir(api.runtime) || process.env.HOME || process.env.USERPROFILE || ".";
     const workspaceDir = path.resolve(baseDir, "..", "workspace");
     const dataDir = path.resolve(baseDir, "mutsumi-world");
+
+    const log = createLogger(dataDir, api.logger);
+    log.info("Plugin registering", { dataDir, workspaceDir });
 
     // 首次安装：复制数据文件
     installDataFiles(workspaceDir);
@@ -43,14 +47,14 @@ const plugin = {
         generateDiary(dataDir, workspaceDir, llmClient, soulPath)
           .then(() => scheduleDiary())
           .catch(err => {
-            api.logger?.error?.("[mutsumi-world] Diary generation failed: " + String(err));
+            log.error("Diary generation failed: " + String(err));
             scheduleDiary();
           });
       }, delay);
     }
     scheduleDiary();
 
-    api.logger?.info?.("[mutsumi-world] Plugin registered");
+    log.info("Plugin registered successfully");
   },
 };
 

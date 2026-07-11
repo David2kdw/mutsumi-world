@@ -8,6 +8,7 @@ import { findCurrentSegment, findNextSegment, expandSchedule, getDayType } from 
 import { computeNPCStates } from "./npc-engine.js";
 import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules, loadScheduleTemplate, loadWeather } from "./data-loader.js";
 import { createLLMClient, type LLMClient, type DMSession, type DMResponse } from "./llm-client.js";
+import { createLogger, type Logger } from "./logger.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 function buildDMSystemPrompt(rules: RulesData, state: WorldState): string {
@@ -219,6 +220,9 @@ export function startDMScheduler(
   api: OpenClawPluginApi,
   dataDir: string,
 ): { stop: () => void; handleObserve: () => Promise<string>; handleMoveTo: (location: string, reason?: string) => Promise<string> } {
+  const log: Logger = createLogger(dataDir, api.logger);
+  log.info("DM scheduler starting", { dataDir });
+
   const llmClient = createLLMClient();
   const locations = loadLocations();
   const network = loadRoadNetwork();
@@ -245,7 +249,7 @@ export function startDMScheduler(
     const date = getDate();
     const dayType = getDayType(date);
 
-    api.logger?.info?.(`[mutsumi-world] Morning routine: ${date} (${dayType})`);
+    log.info(`Morning routine: ${date} (${dayType})`);
 
     // 读或创建 world.json
     let state: WorldState;
@@ -274,12 +278,13 @@ export function startDMScheduler(
     const ctx = buildTickContext(state, "07:00", locations, network, npcs);
     const prompt = buildDMTickPrompt(state, ctx, events);
     const response = await dmSession.send(prompt);
+    log.debug("DM morning response", { response });
 
     applyDMResponse(state, response, "07:00");
     state.last_tick = "07:00";
     writeWorld(dataDir, state);
 
-    api.logger?.info?.(`[mutsumi-world] Morning routine complete. Weather: ${state._dm.weather}`);
+    log.info(`Morning routine complete. Weather: ${state._dm.weather}, Schedule: ${state._dm.schedule.length} segments`);
   }
 
   async function tick(): Promise<void> {
@@ -293,7 +298,7 @@ export function startDMScheduler(
     try {
       state = readWorld(dataDir);
     } catch {
-      api.logger?.warn?.("[mutsumi-world] No world.json found, skipping tick");
+      log.warn("No world.json found, skipping tick");
       return;
     }
 
@@ -318,6 +323,7 @@ export function startDMScheduler(
 
       state._mutsumi.position.progress = progress;
       if (arrived) {
+        log.info(`Arrived at ${state._mutsumi.position.to}`);
         appendTrajectory(state, {
           time,
           note: `到达${state._mutsumi.position.to}`,
@@ -334,6 +340,7 @@ export function startDMScheduler(
     if (dmSession) {
       const prompt = buildDMTickPrompt(state, ctx, events);
       const response = await dmSession.send(prompt);
+      log.debug(`Tick ${time} DM response`, { action: response.action, hasEvent: !!response.event });
       applyDMResponse(state, response, time);
     }
 
@@ -357,7 +364,7 @@ export function startDMScheduler(
   (async () => {
     const state = await recoverFromCrash(dataDir, locations, network, npcs);
     if (state) {
-      api.logger?.info?.(`[mutsumi-world] Recovered from crash. Gap since ${state._mutsumi.trajectory[state._mutsumi.trajectory.length - 1]?.time || "unknown"}`);
+      log.info(`Recovered from crash. Last tick was ${state.last_tick}`);
     }
   })();
 
@@ -382,12 +389,14 @@ export function startDMScheduler(
 
   return {
     stop() {
+      log.info("DM scheduler stopping");
       if (timer) clearInterval(timer);
       if (morningTimer) clearTimeout(morningTimer);
       if (diaryTimer) clearTimeout(diaryTimer);
       if (dmSession) dmSession.close();
     },
     async handleObserve(): Promise<string> {
+      log.debug("睦子米观察周围");
       // 由 tools.ts 调用
       const state = readWorld(dataDir);
       const time = getTime();
@@ -403,6 +412,7 @@ export function startDMScheduler(
       return state._dm.environment;
     },
     async handleMoveTo(location: string, reason?: string): Promise<string> {
+      log.info(`睦子米主动移动到 ${location}${reason ? ` (${reason})` : ""}`);
       // 由 tools.ts 调用
       const state = readWorld(dataDir);
       const time = getTime();
