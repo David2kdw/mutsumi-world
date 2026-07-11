@@ -3,7 +3,7 @@ import type {
   Position, RulesData, TickContext,
 } from "./types.js";
 import { readWorld, writeWorld, appendTrajectory } from "./world-state.js";
-import { findRoute } from "./map-engine.js";
+import { findRoute, advanceTraveling } from "./map-engine.js";
 import { findCurrentSegment, findNextSegment } from "./schedule-engine.js";
 import { computeNPCStates } from "./npc-engine.js";
 import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules } from "./data-loader.js";
@@ -138,6 +138,75 @@ function applyDMResponse(state: WorldState, response: DMResponse, time: string):
 
 const TICK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
 
+async function recoverFromCrash(
+  dataDir: string,
+  locations: ReturnType<typeof loadLocations>,
+  network: ReturnType<typeof loadRoadNetwork>,
+  npcs: ReturnType<typeof loadNPCs>,
+): Promise<WorldState | null> {
+  let state: WorldState;
+  try {
+    state = readWorld(dataDir);
+  } catch {
+    return null; // 没有 world.json，不需要恢复
+  }
+
+  if (!state.last_tick) return state;
+
+  const now = new Date();
+  const nowTime = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  const [lastH, lastM] = state.last_tick.split(":").map(Number);
+  const [nowH, nowM] = nowTime.split(":").map(Number);
+  const gapMs = ((nowH * 60 + nowM) - (lastH * 60 + lastM)) * 60 * 1000;
+
+  if (gapMs <= 0) return state; // 没有缺口
+
+  // 推进 traveling 中的坐标
+  if (state._mutsumi.position.type === "traveling") {
+    const route = state._mutsumi.position.route;
+    // 计算路线总距离
+    let totalDist = 0;
+    const nodeMap = new Map(network.nodes.map(n => [n.id, n.coord]));
+    for (let i = 1; i < route.length; i++) {
+      const fromCoord = nodeMap.get(route[i - 1])!;
+      const toCoord = nodeMap.get(route[i])!;
+      const dx = toCoord.x - fromCoord.x;
+      const dy = toCoord.y - fromCoord.y;
+      totalDist += Math.sqrt(dx * dx + dy * dy);
+    }
+
+    const { arrived } = advanceTraveling(
+      state._mutsumi.position,
+      gapMs,
+      1.2,
+      totalDist,
+    );
+
+    if (arrived) {
+      appendTrajectory(state, {
+        time: nowTime,
+        note: `到达${state._mutsumi.position.to}`,
+      });
+      state._mutsumi.position = {
+        type: "location",
+        name: state._mutsumi.position.to,
+      };
+    }
+  }
+
+  // 检查日程边界（如果跨过了多个日程段，补上轨迹）
+  // 简化处理：补一条"世界恢复运行"
+  appendTrajectory(state, {
+    time: nowTime,
+    note: `世界恢复运行（上次 tick: ${state.last_tick}）`,
+  });
+
+  state.last_tick = nowTime;
+  writeWorld(dataDir, state);
+
+  return state;
+}
+
 export function startDMScheduler(
   api: OpenClawPluginApi,
   dataDir: string,
@@ -270,6 +339,14 @@ export function startDMScheduler(
       morningRoutine().then(() => scheduleMorning());
     }, delay);
   }
+
+  // 崩溃恢复
+  (async () => {
+    const state = await recoverFromCrash(dataDir, locations, network, npcs);
+    if (state) {
+      api.logger?.info?.(`[mutsumi-world] Recovered from crash. Gap since ${state._mutsumi.trajectory[state._mutsumi.trajectory.length - 1]?.time || "unknown"}`);
+    }
+  })();
 
   scheduleMorning();
   timer = setInterval(tick, TICK_INTERVAL_MS);
