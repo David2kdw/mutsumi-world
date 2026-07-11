@@ -5,10 +5,11 @@ import * as os from "node:os";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
 import { createEmptyWorld, readWorld, writeWorld, appendTrajectory } from "./world-state.js";
-import { loadLocations, loadRoadNetwork, loadScheduleTemplate } from "./data-loader.js";
+import { loadLocations, loadRoadNetwork, loadScheduleTemplate, loadNPCs } from "./data-loader.js";
 import { findRoute, getCoordAt, distance } from "./map-engine.js";
 import { expandSchedule, findCurrentSegment, getDayType } from "./schedule-engine.js";
 import { computeNPCStates } from "./npc-engine.js";
+import { recoverFromCrash } from "./dm-session.js";
 
 describe("end-to-end: world simulation", () => {
   let tmpDir: string;
@@ -77,9 +78,10 @@ describe("end-to-end: world simulation", () => {
     }
   });
 
-  it("crash recovery: traveling position restored", () => {
+  it("crash recovery: traveling position restored", async () => {
     const locations = loadLocations();
     const network = loadRoadNetwork();
+    const npcs = loadNPCs();
     const route = findRoute(network, locations, "家", "校门");
 
     const state = createEmptyWorld("2026-07-13", "weekday");
@@ -88,16 +90,27 @@ describe("end-to-end: world simulation", () => {
       from: "家",
       to: "校门",
       route: route.nodes,
-      progress: 0.3,
+      progress: 0.0,
       started_at: "07:45",
     };
-    state.last_tick = "07:50";
+    state.last_tick = "07:45";
     writeWorld(tmpDir, state);
 
-    // 模拟恢复：读取后推进
-    const recovered = readWorld(tmpDir);
-    assert.strictEqual(recovered._mutsumi.position.type, "traveling");
-    // progress 应大于 0.3（时间过去了）
-    assert.ok(recovered._mutsumi.position.progress >= 0.3);
+    // 调用 recoverFromCrash 实际推进 traveling
+    const recovered = await recoverFromCrash(tmpDir, locations, network, npcs);
+
+    assert.ok(recovered, "recoverFromCrash should return state");
+    if (!recovered) return;
+
+    // 因为时间过去了（last_tick=07:45 到 now），应该推进了 progress
+    // 如果差距足够大，应该已经到达校门
+    const pos = recovered._mutsumi.position;
+    if (pos.type === "traveling") {
+      assert.ok(pos.progress > 0.0, "progress should have advanced from 0.0");
+    } else {
+      // 如果已到达，应在校门
+      assert.strictEqual(pos.type, "location");
+      assert.strictEqual(pos.name, "校门");
+    }
   });
 });

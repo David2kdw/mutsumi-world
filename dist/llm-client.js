@@ -8,10 +8,17 @@
  * 4. 使用 rules.json 中的 tone 和 style 指令
  */
 export function createLLMClient(_api) {
-    // TODO: 实现时探索 OpenClaw 的 LLM 调用机制
-    // 可能的方式：
-    //   A) OpenClaw 内部 API：api.runtime 上的某个方法
-    //   B) OpenAI-compatible HTTP API（如果 OpenClaw 暴露）
-    //   C) child_process 调用 openclaw CLI
-    throw new Error("LLMClient implementation depends on OpenClaw API discovery");
+    return {
+        dmChat(_systemPrompt) {
+            return {
+                async send(_prompt) {
+                    return { action: "none" };
+                },
+                close() { },
+            };
+        },
+        async complete(_systemPrompt, _userPrompt) {
+            return "(LLM 客户端尚未配置)";
+        },
+    };
 }

@@ -1,8 +1,8 @@
-import { readWorld, writeWorld, appendTrajectory } from "./world-state.js";
+import { readWorld, writeWorld, appendTrajectory, createEmptyWorld } from "./world-state.js";
 import { findRoute, advanceTraveling } from "./map-engine.js";
-import { findCurrentSegment, findNextSegment } from "./schedule-engine.js";
+import { findCurrentSegment, findNextSegment, expandSchedule, getDayType } from "./schedule-engine.js";
 import { computeNPCStates } from "./npc-engine.js";
-import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules } from "./data-loader.js";
+import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules, loadScheduleTemplate, loadWeather } from "./data-loader.js";
 import { createLLMClient } from "./llm-client.js";
 function buildDMSystemPrompt(rules, state) {
     return `你是月之森女子学园世界的导演。你的职责是客观描述这个世界的运转。
@@ -34,7 +34,7 @@ ${rules.tone}
 如果没有事件，不编造。平淡的日子没关系。
 如果决定移动，给出理由。大部分日子不改日程。`;
 }
-function buildDMTickPrompt(state, ctx) {
+function buildDMTickPrompt(state, ctx, events) {
     const pos = state._mutsumi.position;
     const posDesc = pos.type === "location"
         ? `目前在 ${pos.name}`
@@ -60,6 +60,13 @@ ${ctx.npc_states.map(n => {
             const p = n.position;
             return `- ${n.display}：${p.type === "location" ? p.name : `从${p.from}去${p.to}的路上`}`;
         }).join("\n")}`;
+    }
+    if (events) {
+        const locName = pos.type === "location" ? pos.name : pos.to;
+        const locEvents = events[locName];
+        if (locEvents && locEvents.length > 0) {
+            prompt += `\n\n当前位置（${locName}）可能发生的事件：\n${locEvents.map(e => `- ${e.name}（${e.type}, 稀有度: ${e.rarity}）：${e.description}`).join("\n")}`;
+        }
     }
     return prompt;
 }
@@ -108,7 +115,7 @@ function applyDMResponse(state, response, time) {
     }
 }
 const TICK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
-async function recoverFromCrash(dataDir, locations, network, npcs) {
+export async function recoverFromCrash(dataDir, locations, network, npcs) {
     let state;
     try {
         state = readWorld(dataDir);
@@ -167,6 +174,7 @@ export function startDMScheduler(api, dataDir) {
     const npcs = loadNPCs();
     const rules = loadRules();
     const events = loadEvents();
+    const weather = loadWeather();
     let dmSession = null;
     let timer = null;
     let morningTimer = null;
@@ -178,17 +186,9 @@ export function startDMScheduler(api, dataDir) {
     function getDate() {
         return new Date().toISOString().slice(0, 10);
     }
-    function getDayTypeForToday() {
-        const day = new Date().getDay();
-        if (day === 6)
-            return "saturday";
-        if (day === 0)
-            return "sunday";
-        return "weekday";
-    }
     async function morningRoutine() {
         const date = getDate();
-        const dayType = getDayTypeForToday();
+        const dayType = getDayType(date);
         api.logger?.info?.(`[mutsumi-world] Morning routine: ${date} (${dayType})`);
         // 读或创建 world.json
         let state;
@@ -196,19 +196,15 @@ export function startDMScheduler(api, dataDir) {
             state = readWorld(dataDir);
         }
         catch {
-            state = {
-                last_tick: "07:00",
-                date,
-                day_type: dayType,
-                _dm: { weather: "", schedule: [], environment: "", active_events: [] },
-                _mutsumi: { position: { type: "location", name: "家" }, trajectory: [] },
-            };
+            state = createEmptyWorld(date, dayType);
         }
         state.date = date;
         state.day_type = dayType;
         // 天气
         state._dm.weather = pickWeather();
-        state._dm.schedule = [];
+        // 展开日程
+        const scheduleTemplate = loadScheduleTemplate();
+        state._dm.schedule = expandSchedule(scheduleTemplate, date);
         // 创建 DM session
         if (dmSession)
             dmSession.close();
@@ -216,7 +212,7 @@ export function startDMScheduler(api, dataDir) {
         dmSession = llmClient.dmChat(sysPrompt);
         // 晨间 tick
         const ctx = buildTickContext(state, "07:00", locations, network, npcs);
-        const prompt = buildDMTickPrompt(state, ctx);
+        const prompt = buildDMTickPrompt(state, ctx, events);
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, "07:00");
         state.last_tick = "07:00";
@@ -239,10 +235,18 @@ export function startDMScheduler(api, dataDir) {
         }
         // 推进 traveling
         if (state._mutsumi.position.type === "traveling") {
-            const elapsedMs = TICK_INTERVAL_MS; // approx since last tick
-            // 精确计算下次再说，先用近似值
-            state._mutsumi.position.progress = Math.min(1, state._mutsumi.position.progress + 0.1);
-            if (state._mutsumi.position.progress >= 1) {
+            // 计算路线总距离
+            const route = state._mutsumi.position.route;
+            let totalDist = 0;
+            const nodeMap = new Map(network.nodes.map(n => [n.id, n.coord]));
+            for (let i = 1; i < route.length; i++) {
+                const fromCoord = nodeMap.get(route[i - 1]);
+                const toCoord = nodeMap.get(route[i]);
+                totalDist += Math.sqrt((toCoord.x - fromCoord.x) ** 2 + (toCoord.y - fromCoord.y) ** 2);
+            }
+            const { progress, arrived } = advanceTraveling(state._mutsumi.position, TICK_INTERVAL_MS, 1.2, totalDist);
+            state._mutsumi.position.progress = progress;
+            if (arrived) {
                 appendTrajectory(state, {
                     time,
                     note: `到达${state._mutsumi.position.to}`,
@@ -255,7 +259,7 @@ export function startDMScheduler(api, dataDir) {
         }
         const ctx = buildTickContext(state, time, locations, network, npcs);
         if (dmSession) {
-            const prompt = buildDMTickPrompt(state, ctx);
+            const prompt = buildDMTickPrompt(state, ctx, events);
             const response = await dmSession.send(prompt);
             applyDMResponse(state, response, time);
         }
@@ -284,9 +288,20 @@ export function startDMScheduler(api, dataDir) {
     scheduleMorning();
     timer = setInterval(tick, TICK_INTERVAL_MS);
     function pickWeather() {
-        // 简化的天气随机——后续可以读 weather.json 做加权
-        const pool = ["晴", "晴", "晴", "多云", "多云", "小雨"];
-        return pool[Math.floor(Math.random() * pool.length)];
+        const month = new Date().getMonth() + 1; // 1-12
+        for (const [_season, config] of Object.entries(weather)) {
+            if (config.months.includes(month)) {
+                const totalWeight = config.pool.reduce((sum, w) => sum + w.weight, 0);
+                let r = Math.random() * totalWeight;
+                for (const option of config.pool) {
+                    r -= option.weight;
+                    if (r <= 0)
+                        return option.type;
+                }
+                return config.pool[0].type;
+            }
+        }
+        return "晴"; // fallback
     }
     return {
         stop() {
@@ -305,7 +320,7 @@ export function startDMScheduler(api, dataDir) {
             const time = getTime();
             const ctx = buildTickContext(state, time, locations, network, npcs);
             if (dmSession) {
-                const prompt = buildDMTickPrompt(state, ctx) + "\n（睦子米刚才观察了周围）";
+                const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米刚才观察了周围）";
                 const response = await dmSession.send(prompt);
                 applyDMResponse(state, response, time);
                 state.last_tick = time;
@@ -336,7 +351,7 @@ export function startDMScheduler(api, dataDir) {
             });
             if (dmSession) {
                 const ctx = buildTickContext(state, time, locations, network, npcs);
-                const prompt = buildDMTickPrompt(state, ctx) + "\n（睦子米主动出发去" + location + "）";
+                const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米主动出发去" + location + "）";
                 const response = await dmSession.send(prompt);
                 applyDMResponse(state, response, time);
             }
