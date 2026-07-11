@@ -3,6 +3,9 @@
   "name": "Mutsumi World",
   "description": "若叶睦「楚门的世界」世界模拟插件",
   "extensions": ["./preload.cjs"],
+  "contracts": {
+    "tools": {}
+  },
   "configSchema": {},
   "capabilities": {}
 }
