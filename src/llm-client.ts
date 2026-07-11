@@ -1,55 +1,162 @@
-import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
-
 export interface DMResponse {
   action: "move" | "stay" | "event" | "none";
-  environment?: string;         // 新的环境描述
+  environment?: string;
   event?: {
     id: string;
     name: string;
     location: string;
     status: string;
   };
-  event_note?: string;          // 追加到 trajectory
-  resolve_event_id?: string;    // 要移除的事件 ID
-  move_to?: string;             // 决定去哪个地点
-  departure_note?: string;      // 出发时追加到 trajectory
+  event_note?: string;
+  resolve_event_id?: string;
+  move_to?: string;
+  departure_note?: string;
 }
 
 export interface LLMClient {
-  /** 创建新的 DM 每日 session */
   dmChat(systemPrompt: string): DMSession;
-  /** 单次完成（用于日记等一次性任务） */
   complete(systemPrompt: string, userPrompt: string): Promise<string>;
 }
 
 export interface DMSession {
-  /** 发送 prompt 并获取结构化响应 */
   send(prompt: string): Promise<DMResponse>;
-  /** 关闭 session */
   close(): void;
 }
 
-/**
- * 创建 LLM 客户端。具体实现取决于 OpenClaw 提供的 API。
- *
- * 实现要点：
- * 1. DM session 需要在 07:00 创建，次日 07:00 销毁
- * 2. 每次 send() 要携带之前的上下文
- * 3. DM prompt 中要求返回结构化 JSON，本 client 负责解析
- * 4. 使用 rules.json 中的 tone 和 style 指令
- */
-export function createLLMClient(_api: OpenClawPluginApi): LLMClient {
+export interface LLMConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+const DEFAULT_BASE_URL = "https://api.deepseek.com";
+const DEFAULT_MODEL = "deepseek-chat";
+
+function getConfig(overrides?: Partial<LLMConfig>): LLMConfig {
   return {
-    dmChat(_systemPrompt: string): DMSession {
+    apiKey: overrides?.apiKey
+      || process.env.DEEPSEEK_API_KEY
+      || process.env.OPENAI_API_KEY
+      || "",
+    baseUrl: overrides?.baseUrl || DEFAULT_BASE_URL,
+    model: overrides?.model || DEFAULT_MODEL,
+  };
+}
+
+/**
+ * 从 LLM 响应文本中解析 JSON。
+ * 处理 markdown 代码块包裹、BOM、前后空白。
+ */
+function parseJSONResponse(text: string): DMResponse {
+  let cleaned = text.trim();
+
+  // 去掉 markdown 代码块包裹
+  const fenceMatch = cleaned.match(/^```(?:json)?\s*\n([\s\S]*?)\n\s*```$/);
+  if (fenceMatch) {
+    cleaned = fenceMatch[1].trim();
+  }
+
+  try {
+    return JSON.parse(cleaned) as DMResponse;
+  } catch {
+    // 如果解析失败，返回 no-op
+    return { action: "none", environment: cleaned.slice(0, 500) };
+  }
+}
+
+/**
+ * 调用 DeepSeek Chat Completions API（OpenAI 兼容格式）。
+ */
+async function chatCompletion(
+  config: LLMConfig,
+  messages: ChatMessage[],
+): Promise<string> {
+  const url = `${config.baseUrl}/v1/chat/completions`;
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${config.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: config.model,
+      messages,
+      temperature: 0.7,
+      max_tokens: 1024,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(
+      `DeepSeek API error ${response.status}: ${response.statusText}${body ? ` — ${body.slice(0, 300)}` : ""}`,
+    );
+  }
+
+  const data = await response.json() as {
+    choices: Array<{ message: { content: string } }>;
+  };
+
+  return data.choices?.[0]?.message?.content ?? "";
+}
+
+/**
+ * 创建 LLM 客户端。
+ *
+ * API key 读取优先级：config.apiKey → DEEPSEEK_API_KEY 环境变量 → OPENAI_API_KEY 环境变量
+ * 默认 baseUrl: https://api.deepseek.com
+ * 默认 model: deepseek-chat
+ */
+export function createLLMClient(config?: Partial<LLMConfig>): LLMClient {
+  const resolved = getConfig(config);
+
+  if (!resolved.apiKey) {
+    throw new Error(
+      "LLMClient: 未找到 API key。请设置 DEEPSEEK_API_KEY 环境变量，或传入 config.apiKey。",
+    );
+  }
+
+  return {
+    dmChat(systemPrompt: string): DMSession {
+      const history: ChatMessage[] = [
+        { role: "system", content: systemPrompt },
+      ];
+
+      let closed = false;
+
       return {
-        async send(_prompt: string): Promise<DMResponse> {
-          return { action: "none" };
+        async send(prompt: string): Promise<DMResponse> {
+          if (closed) throw new Error("DMSession is closed");
+
+          history.push({ role: "user", content: prompt });
+
+          const text = await chatCompletion(resolved, history);
+
+          history.push({ role: "assistant", content: text });
+
+          return parseJSONResponse(text);
         },
-        close() {},
+
+        close() {
+          closed = true;
+          history.length = 0;
+        },
       };
     },
-    async complete(_systemPrompt: string, _userPrompt: string): Promise<string> {
-      return "(LLM 客户端尚未配置)";
+
+    async complete(systemPrompt: string, userPrompt: string): Promise<string> {
+      const messages: ChatMessage[] = [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: userPrompt },
+      ];
+
+      return chatCompletion(resolved, messages);
     },
   };
 }

@@ -32,7 +32,7 @@ const plugin = {
                 diaryTime.setDate(diaryTime.getDate() + 1);
             const delay = diaryTime.getTime() - now.getTime();
             setTimeout(() => {
-                const llmClient = createLLMClient(api);
+                const llmClient = createLLMClient();
                 const soulPath = path.join(workspaceDir, "SOUL.md");
                 generateDiary(dataDir, workspaceDir, llmClient, soulPath)
                     .then(() => scheduleDiary())

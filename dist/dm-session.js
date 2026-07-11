@@ -168,7 +168,7 @@ export async function recoverFromCrash(dataDir, locations, network, npcs) {
     return state;
 }
 export function startDMScheduler(api, dataDir) {
-    const llmClient = createLLMClient(api);
+    const llmClient = createLLMClient();
     const locations = loadLocations();
     const network = loadRoadNetwork();
     const npcs = loadNPCs();

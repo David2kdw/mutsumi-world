@@ -219,7 +219,7 @@ export function startDMScheduler(
   api: OpenClawPluginApi,
   dataDir: string,
 ): { stop: () => void; handleObserve: () => Promise<string>; handleMoveTo: (location: string, reason?: string) => Promise<string> } {
-  const llmClient = createLLMClient(api);
+  const llmClient = createLLMClient();
   const locations = loadLocations();
   const network = loadRoadNetwork();
   const npcs = loadNPCs();
