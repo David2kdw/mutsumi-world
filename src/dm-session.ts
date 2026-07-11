@@ -331,11 +331,19 @@ export function startDMScheduler(
     // 新的一天，清空轨迹
     state._mutsumi.trajectory = [];
 
-    // 创建新的 DM session
+    // 创建新的 DM session + 初始 tick
     if (dmSession) dmSession.close();
     const sysPrompt = buildDMSystemPrompt(rules, state, npcs);
     dmSession = llmClient.dmChat(sysPrompt);
 
+    const time = getTime();
+    const ctx = buildTickContext(state, time, locations, network, npcs);
+    const prompt = buildDMTickPrompt(state, ctx, events);
+    const response = await dmSession.send(prompt);
+    log.info(`DM midnight → ${response.environment || "(无环境描述)"}`);
+
+    applyDMResponse(state, response, time, eventLookup);
+    state.last_tick = time;
     writeWorld(dataDir, state);
     saveDMSessionState(dataDir, date, dmSession, log);
     log.info(`Midnight complete. Weather: ${state._dm.weather}, Schedule: ${state._dm.schedule.length} segments`);
