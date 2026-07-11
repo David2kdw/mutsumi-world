@@ -15,46 +15,59 @@
 ## 已完成
 
 - [x] 世界模拟引擎（地图/日程/NPC/事件/LLM 客户端/DM 会话）（2026-07-11）
-- [x] 4 个基础工具：world_status / check_schedule / observe_surroundings / move_to（2026-07-11）
-- [x] 日记生成（23:30 自动 + write_diary 手动，纯 trajectory 不读 QQ 聊天）（2026-07-11）
+- [x] 6 个基础工具：world_status / check_schedule / observe_surroundings / move_to / handle_event / write_diary（2026-07-11）
+- [x] 日记生成（23:30 自动 + write_diary 手动）（2026-07-11）
 - [x] DM session 持久化到 dm-sessions/ 目录（2026-07-11）
 - [x] 日志时间戳改为本地时间（2026-07-11）
-- [x] 启动时直接跑 morningRoutine，不用手动拼世界/session（2026-07-11）
-- [x] move_to 返回值明确说"正在路上"，不描述目的地（2026-07-11）
-- [x] traveling 时不显示目的地事件（2026-07-11）
 - [x] observe 返回完整事件信息（含 id + description）（2026-07-11）
-- [x] 6 个工具全部记返回值日志（2026-07-11）
-- [x] DM prompt 中显示 event id（2026-07-11）
-- [x] event_note 始终记入轨迹（不再被 event:null 丢弃）（2026-07-11）
-- [x] DM prompt 禁止 auto-resolve 事件（2026-07-11）
+- [x] event_note 始终记入轨迹（2026-07-11）
+- [x] 事件系统重构：ActiveEvent → GameEvent 统一类型，DM 自定义事件与预定义事件同权（2026-07-12）
+- [x] event-utils.ts：buildEventLookup（O(1) 查找）、mergeEvent（预定义+DM 合并）（2026-07-12）
+- [x] observe_surroundings 不再扫描 events.json，直接用 GameEvent 自带字段（2026-07-12）
+- [x] 事件生命周期：未处理 → 处理中 → DM 收束（2026-07-12）
+- [x] handle_event 标记 status="处理中" 而非删除，DM 负责正式收束（2026-07-12）
+- [x] GameEvent 加 created_at / handled_at 时间戳（2026-07-12）
+- [x] DM tick prompt 按状态显示事件时间线（2026-07-12）
+- [x] world_status 先触发 DM tick 再返回（2026-07-12）
+- [x] DM prompt 翻转：resolve_event_id 从禁止变为鼓励（在合适时机收束）（2026-07-12）
+- [x] 午夜 routine 替代晨间 routine：00:00 统一处理日期/天气/日程/DM session（2026-07-12）
+- [x] 日程覆盖 00:00-00:00（24h），00:00-07:00 标记为睡眠（2026-07-12）
+- [x] getDate 改用本地时间（修复 UTC+8 凌晨拿到前一天日期）（2026-07-12）
+- [x] handle_event 返回值带 DM 环境叙事，bot 能感知 NPC 反馈（2026-07-12）
+- [x] applyDMResponse 同 id 事件更新而非跳过（DM 补充描述不丢失）（2026-07-12）
+- [x] traveling 推进抽成共享函数 advanceTravelingIfNeeded，所有 handler 调用（2026-07-12）
+- [x] 跨午夜时间差修复（recoverFromCrash + advanceTravelingIfNeeded）（2026-07-12）
+- [x] DM prompt 强化：禁止在收到处理消息后立即收束事件（2026-07-12）
+- [x] SOUL.md 事件交互规则：多轮互动，不做单次处理（2026-07-12）
+- [x] 22 个测试全过（2026-07-12）
 
 ## 进行中
 
-- [ ] handle_event 工具：让睦子米主动处理事件（2026-07-11）
-  - 代码已写好，待测试
-  - 依赖 DM 使用正确的 event id（预定义或自定义）
-- [ ] SOUL.md 集成所有工具（2026-07-11）
-  - 已有 §十三 楚门的世界，可能需要微调
+_目前无进行中的功能。_
 
 ## Bug
 
-- [x] BUG: active_events 重复（applyDMResponse 未去重）— 已修复 2026-07-11
+- [x] BUG: active_events 重复 — 已修复 2026-07-11
 - [x] BUG: 日志时间 UTC 差 8 小时 — 已修复 2026-07-11
-- [x] BUG: 中午重启后 dmSession=null，tick 全空转 — 已修复 2026-07-11
-- [x] BUG: move_to 后睦子米以为到了目的地 — 已修复（返回值 + SOUL.md）2026-07-11
+- [x] BUG: 中午重启后 dmSession=null — 已修复 2026-07-11
+- [x] BUG: move_to 后睦子米以为到了目的地 — 已修复 2026-07-11
 - [x] BUG: traveling 时 DM 描述目的地场景 — 已修复 2026-07-11
 - [x] BUG: event_note 在 event:null 时被丢弃 — 已修复 2026-07-11
-- [ ] BUG: DM 有时仍然替睦子米 auto-resolve 事件（设为 null 不设 resolve_event_id）
-  - prompt 已改，需要测试验证
+- [x] BUG: getDate 用 UTC 导致凌晨日期错误 — 已修复 2026-07-12
+- [x] BUG: 夜间 traveling 不推进（tick 只在 07-23 运行）— 已修复 2026-07-12
+- [x] BUG: handle_event 后 DM 叙事被吞（返回值无反馈）— 已修复 2026-07-12
+- [x] BUG: DM 在 handle_event 同一轮立即收束事件 — prompt 已强化 2026-07-12
+- [x] BUG: recoverFromCrash 跨午夜时间差为负 — 已修复 2026-07-12
 
 ## 阻碍
 
 _目前无阻碍。_
 
-## 未提交的改动
+## 未验证的改动
 
-- event 机制完善（event id 显示、event_note 保存、禁止 auto-resolve）
-- write_diary / handle_event 工具
-- 日记去掉 QQ chat log 解析
-- dm-sessions/ 子目录
-- 多个 dm-session / move_to / observe 优化
+以下改动代码已写好、编译通过、测试通过，但还没有在实际 bot 对话中验证效果：
+
+- [ ] handle_event 多轮交互：bot 是否会在得到 DM 反馈后自然地继续对话（而非处理一次就停）
+- [ ] DM 是否真的不会在收到 handle_event 后立即收束（prompt 已强化"至少等一个 tick 周期"）
+- [ ] 午夜 routine 跨天后 DM session 是否正确创建、首条 tick 是否正常
+- [ ] 凌晨 move_to → observe 往返：traveling 是否正常推进、到达后位置是否正确切换
