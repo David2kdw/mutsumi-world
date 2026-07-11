@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { expandSchedule, getDayType, getDayName } from "./schedule-engine.js";
-import type { ScheduleTemplate } from "./types.js";
+import { expandSchedule, getDayType, getDayName } from "../src/schedule-engine.js";
+import type { ScheduleTemplate } from "../src/types.js";
 
 const testTemplate: ScheduleTemplate = {
   weekday: {

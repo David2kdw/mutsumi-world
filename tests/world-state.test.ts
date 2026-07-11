@@ -3,8 +3,8 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { readWorld, writeWorld, createEmptyWorld, appendTrajectory } from "./world-state.js";
-import type { WorldState } from "./types.js";
+import { readWorld, writeWorld, createEmptyWorld, appendTrajectory } from "../src/world-state.js";
+import type { WorldState } from "../src/types.js";
 
 describe("world-state", () => {
   let tmpDir: string;

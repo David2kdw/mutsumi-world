@@ -4,12 +4,12 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert";
-import { createEmptyWorld, readWorld, writeWorld, appendTrajectory } from "./world-state.js";
-import { loadLocations, loadRoadNetwork, loadScheduleTemplate, loadNPCs } from "./data-loader.js";
-import { findRoute, getCoordAt, distance } from "./map-engine.js";
-import { expandSchedule, findCurrentSegment, getDayType } from "./schedule-engine.js";
-import { computeNPCStates } from "./npc-engine.js";
-import { recoverFromCrash } from "./dm-session.js";
+import { createEmptyWorld, readWorld, writeWorld, appendTrajectory } from "../src/world-state.js";
+import { loadLocations, loadRoadNetwork, loadScheduleTemplate, loadNPCs } from "../src/data-loader.js";
+import { findRoute, getCoordAt, distance } from "../src/map-engine.js";
+import { expandSchedule, findCurrentSegment, getDayType } from "../src/schedule-engine.js";
+import { computeNPCStates } from "../src/npc-engine.js";
+import { recoverFromCrash } from "../src/dm-session.js";
 
 describe("end-to-end: world simulation", () => {
   let tmpDir: string;

@@ -1,9 +1,9 @@
 // src/npc-engine.test.ts
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { computeNPCStates, findCurrentNPCSchedule } from "./npc-engine.js";
-import { loadLocations, loadRoadNetwork, loadNPCs } from "./data-loader.js";
-import type { NPCsData } from "./types.js";
+import { computeNPCStates, findCurrentNPCSchedule } from "../src/npc-engine.js";
+import { loadLocations, loadRoadNetwork, loadNPCs } from "../src/data-loader.js";
+import type { NPCsData } from "../src/types.js";
 
 const testNPCs: NPCsData = {
   "丰川祥子": {

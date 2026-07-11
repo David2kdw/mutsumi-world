@@ -1,8 +1,8 @@
 // src/map-engine.test.ts
 import { describe, it } from "node:test";
 import assert from "node:assert";
-import { findRoute, distance, buildAdjacency, getNodeForLocation } from "./map-engine.js";
-import type { RoadNetwork, LocationsData, Coord } from "./types.js";
+import { findRoute, distance, buildAdjacency, getNodeForLocation } from "../src/map-engine.js";
+import type { RoadNetwork, LocationsData, Coord } from "../src/types.js";
 
 // 使用 spec 中的路网数据做测试
 const testNetwork: RoadNetwork = {

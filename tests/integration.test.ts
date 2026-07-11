@@ -3,13 +3,13 @@ import assert from "node:assert";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import { createLLMClient, type DMResponse } from "./llm-client.js";
-import { createEmptyWorld, writeWorld, readWorld, appendTrajectory } from "./world-state.js";
-import { loadLocations, loadRoadNetwork, loadNPCs, loadRules, loadEvents, loadScheduleTemplate } from "./data-loader.js";
-import { expandSchedule, findCurrentSegment, findNextSegment, getDayType } from "./schedule-engine.js";
-import { findRoute } from "./map-engine.js";
-import { computeNPCStates } from "./npc-engine.js";
-import type { WorldState, TickContext } from "./types.js";
+import { createLLMClient, type DMResponse } from "../src/llm-client.js";
+import { createEmptyWorld, writeWorld, readWorld, appendTrajectory } from "../src/world-state.js";
+import { loadLocations, loadRoadNetwork, loadNPCs, loadRules, loadEvents, loadScheduleTemplate } from "../src/data-loader.js";
+import { expandSchedule, findCurrentSegment, findNextSegment, getDayType } from "../src/schedule-engine.js";
+import { findRoute } from "../src/map-engine.js";
+import { computeNPCStates } from "../src/npc-engine.js";
+import type { WorldState, TickContext } from "../src/types.js";
 
 // 仅在设置 DEEPSEEK_API_KEY 时运行
 const HAS_KEY = !!process.env.DEEPSEEK_API_KEY;
