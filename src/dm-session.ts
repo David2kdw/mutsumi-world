@@ -298,7 +298,8 @@ export function startDMScheduler(
   }
 
   function getDate(): string {
-    return new Date().toISOString().slice(0, 10);
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
   }
 
   /** 每日 00:00 例行：数据切换 + DM session 初始化 */
@@ -309,14 +310,16 @@ export function startDMScheduler(
     log.info(`Midnight routine: ${date} (${dayType})`);
 
     let state: WorldState;
+    let isNew = false;
     try {
       state = readWorld(dataDir);
     } catch {
       // 世界不存在 → 首次启动，创建
       state = createEmptyWorld(date, dayType);
+      isNew = true;
     }
 
-    if (state.date === date) return; // 今天已经更新过
+    if (!isNew && state.date === date) return; // 今天已经更新过
 
     state.date = date;
     state.day_type = dayType;
