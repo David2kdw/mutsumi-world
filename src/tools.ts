@@ -71,38 +71,11 @@ export function registerTools(
     },
   });
 
-  // ====== observe_surroundings ======
-  api.registerTool({
-    name: "observe_surroundings",
-    label: "观察周围",
-    description: "仔细观察周围的环境——看到了什么、听到了什么、闻到了什么。当群友问「周围有什么」「在干嘛」时调用。",
-    parameters: { type: "object", properties: {} },
-    async execute() {
-      log.info("睦子米观察周围");
-      try {
-        const env = await scheduler.handleObserve();
-        const state = readWorld(dataDir);
-        // 活跃事件自带完整数据，不需要扫描 events.json
-        const events = state._dm.active_events
-          .map(e => {
-            const hint = e.resolve_hint ? ` [提示: ${e.resolve_hint}]` : "";
-            return `【${e.name}】(id: ${e.id}) ${e.location} | ${e.status} — ${e.description}${hint}`;
-          })
-          .join("；");
-        const full = env + (events ? `\n附近的事件：${events}` : "");
-        log.info(`睦子米观察周围 → ${full}`);
-        return textResult(full);
-      } catch {
-        return textResult("看不到周围。");
-      }
-    },
-  });
-
   // ====== move_to ======
   api.registerTool({
     name: "move_to",
     label: "移动到某个地点",
-    description: "主动去另一个地方。日常移动是自动的，只在你想改变行程时使用。",
+    description: "主动去另一个地方。日常移动是自动的，只在你想改变行程时使用。调用一次就够了——出发后用 world_status 看一次路上的场景，然后就回复群友，不需要反复 move_to 去已经在去的地方。",
     parameters: {
       type: "object",
       properties: {
@@ -141,7 +114,7 @@ export function registerTools(
       properties: {
         event_id: {
           type: "string",
-          description: "事件ID（从 observe_surroundings 或 world_status 中获取）",
+          description: "事件ID（从 world_status 中获取）",
         },
         action: {
           type: "string",
@@ -167,12 +140,22 @@ export function registerTools(
   api.registerTool({
     name: "write_diary",
     label: "写日记",
-    description: "现在写今天的日记。如果今天已经写过，会覆盖。当群友说「写日记」「记一下」或者你想记录今天时调用。",
-    parameters: { type: "object", properties: {} },
-    async execute() {
-      log.info("睦子米手动写日记");
+    description: "随手记一笔日记。想到什么写什么，直接追加到今天的日记里。当群友说「写日记」「记一下」或者你想记录什么时调用。",
+    parameters: {
+      type: "object",
+      properties: {
+        text: {
+          type: "string",
+          description: "你想写的内容。一两句就行，不用太长。",
+        },
+      },
+      required: ["text"],
+    },
+    async execute(_toolCallId, params) {
+      const p = params as { text: string };
+      log.info(`睦子米手动写日记：${p.text}`);
       try {
-        const result = await scheduler.handleWriteDiary();
+        const result = await scheduler.handleWriteDiary(p.text);
         log.info(`睦子米 write_diary → ${result}`);
         return textResult(result);
       } catch (err) {
@@ -181,5 +164,5 @@ export function registerTools(
     },
   });
 
-  api.logger?.info?.("[mutsumi-world] 6 tools registered");
+  api.logger?.info?.("[mutsumi-world] 5 tools registered");
 }

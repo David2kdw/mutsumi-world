@@ -14,11 +14,14 @@
 
 ## 已完成
 
+### 世界引擎
 - [x] 世界模拟引擎（地图/日程/NPC/事件/LLM 客户端/DM 会话）（2026-07-11）
-- [x] 6 个基础工具：world_status / check_schedule / observe_surroundings / move_to / handle_event / write_diary（2026-07-11）
+- [x] 5 个工具：world_status / check_schedule / move_to / handle_event / write_diary（2026-07-12 合并 observe_surroundings）
 - [x] 日记生成（23:30 自动 + write_diary 手动）（2026-07-11）
 - [x] DM session 持久化到 dm-sessions/ 目录（2026-07-11）
 - [x] 日志时间戳改为本地时间（2026-07-11）
+
+### 事件系统
 - [x] observe 返回完整事件信息（含 id + description）（2026-07-11）
 - [x] event_note 始终记入轨迹（2026-07-11）
 - [x] 事件系统重构：ActiveEvent → GameEvent 统一类型，DM 自定义事件与预定义事件同权（2026-07-12）
@@ -30,20 +33,60 @@
 - [x] DM tick prompt 按状态显示事件时间线（2026-07-12）
 - [x] world_status 先触发 DM tick 再返回（2026-07-12）
 - [x] DM prompt 翻转：resolve_event_id 从禁止变为鼓励（在合适时机收束）（2026-07-12）
+- [x] handle_event 返回值带 DM 环境叙事，bot 能感知 NPC 反馈（2026-07-12）
+- [x] applyDMResponse 同 id 事件更新而非跳过（DM 补充描述不丢失）（2026-07-12）
+
+### 日程与时间
 - [x] 午夜 routine 替代晨间 routine：00:00 统一处理日期/天气/日程/DM session（2026-07-12）
 - [x] 日程覆盖 00:00-00:00（24h），00:00-07:00 标记为睡眠（2026-07-12）
 - [x] getDate 改用本地时间（修复 UTC+8 凌晨拿到前一天日期）（2026-07-12）
-- [x] handle_event 返回值带 DM 环境叙事，bot 能感知 NPC 反馈（2026-07-12）
-- [x] applyDMResponse 同 id 事件更新而非跳过（DM 补充描述不丢失）（2026-07-12）
 - [x] traveling 推进抽成共享函数 advanceTravelingIfNeeded，所有 handler 调用（2026-07-12）
 - [x] 跨午夜时间差修复（recoverFromCrash + advanceTravelingIfNeeded）（2026-07-12）
+
+### DM 行为
 - [x] DM prompt 强化：禁止在收到处理消息后立即收束事件（2026-07-12）
-- [x] SOUL.md 事件交互规则：多轮互动，不做单次处理（2026-07-12）
+- [x] handle_event prompt 与 system prompt 一致：不再鼓励 DM 在同一轮收束（2026-07-12）
+- [x] handleEvent 幂等：事件已结束时查 trajectory 确认，返回友好消息（2026-07-12）
+- [x] handleEvent 返回值加"（事件已结束）"信号，bot 知道不用重试（2026-07-12）
+
+### 移动系统
+- [x] advanceTravelingIfNeeded 时间基准从 last_tick 改为 started_at，防止高频调用时 progress 不推进（2026-07-12）
+- [x] handleMoveTo 补 advanceTravelingIfNeeded 调用，与其他 handler 一致（2026-07-12）
+
+### 日记
+- [x] diary.ts 移除 trajectory 清空（write_diary 不再回写空轨迹覆盖数据）（2026-07-12）
+- [x] diary.ts 改为 append 模式：手动 write_diary 直接追加，不经 LLM（2026-07-12）
+- [x] write_diary 工具加 text 参数，bot 自己写内容传入（2026-07-12）
+- [x] 23:30 自动总结保留：读手动日记条目 + 轨迹，LLM 生成回顾后 append（2026-07-12）
+
+### Bot 行为指南
+- [x] SOUL.md：移动中只观察一次规则（2026-07-12）
+- [x] SOUL.md：群友不是 NPC 边界规则——DM 数据不是群消息，不要把群友当祥子素世（2026-07-12）
+- [x] SOUL.md：事件交互通过 handle_event 而非 QQ 群对话（2026-07-12）
+- [x] tools.ts：move_to / observe 工具描述加频率提示（2026-07-12）
+
+### 移动系统
+- [x] moveTo 到达自动 tick：出发后按路线预估时间设 setTimeout，到点检测到达并触发 DM 场景（2026-07-12）
+
+### DM 行为
+- [x] 夜间有条件 tick：23:00-07:00 有 traveling 或活跃事件时照常 tick，纯睡觉跳过（2026-07-12）
+- [x] DM tick 冷却：world_status 调用间隔 < 5min 跳过 DM，只读静态状态返回（2026-07-12）
+- [x] world_status 返回值加环境描述（2026-07-12）
+- [x] Tick 间隔改为 15 分钟（2026-07-12）
+
+### 测试
 - [x] 22 个测试全过（2026-07-12）
+
+### DM 通知通道调研
+- [x] scheduleSessionTurn 仅 bundled 插件可用，工作区插件 return silently（2026-07-12）
+- [x] enqueueNextTurnInjection 无限制但只注入不触发回合（2026-07-12）
+- [x] openclaw agent CLI 可触发回合：`openclaw agent --session-key "agent:main:main" --channel qqbot --reply-to "qqbot:group:5B07AA16B5A5253C5B89E0021CF0CF15" --message "..." --deliver`（2026-07-12）
+- [x] QQ session key: `agent:main:main`，群 ID: `5B07AA16B5A5253C5B89E0021CF0CF15`（2026-07-12）
 
 ## 进行中
 
-_目前无进行中的功能。_
+- [ ] DM → Mutsumi 通知通道：DM response 加 `notify_mutsumi` 字段，spawn openclaw agent 推送到 QQ（2026-07-12）
+- [ ] DM prompt 加聊天上下文：world_status 加 `recent_chat` 参数，注入 DM tick prompt（2026-07-12）
 
 ## Bug
 
@@ -58,6 +101,9 @@ _目前无进行中的功能。_
 - [x] BUG: handle_event 后 DM 叙事被吞（返回值无反馈）— 已修复 2026-07-12
 - [x] BUG: DM 在 handle_event 同一轮立即收束事件 — prompt 已强化 2026-07-12
 - [x] BUG: recoverFromCrash 跨午夜时间差为负 — 已修复 2026-07-12
+- [x] BUG: advanceTravelingIfNeeded 用 last_tick 导致高频调用 progress 不推进 — 已修复 2026-07-12
+- [x] BUG: diary.ts 手动写日记后清空 trajectory — 已修复 2026-07-12
+- [x] BUG: bot 把群友当 NPC（对着 LLLDDD 说祥子的台词）— SOUL.md 加边界规则 2026-07-12
 
 ## 阻碍
 
@@ -67,7 +113,9 @@ _目前无阻碍。_
 
 以下改动代码已写好、编译通过、测试通过，但还没有在实际 bot 对话中验证效果：
 
-- [ ] handle_event 多轮交互：bot 是否会在得到 DM 反馈后自然地继续对话（而非处理一次就停）
-- [ ] DM 是否真的不会在收到 handle_event 后立即收束（prompt 已强化"至少等一个 tick 周期"）
-- [ ] 午夜 routine 跨天后 DM session 是否正确创建、首条 tick 是否正常
+- [ ] handle_event 多轮交互：bot 是否会在得到 DM 反馈后自然地继续对话
+- [ ] DM 是否真的不会在收到 handle_event 后立即收束
+- [ ] 午夜 routine 跨天后 DM session 是否正确创建
 - [ ] 凌晨 move_to → observe 往返：traveling 是否正常推进、到达后位置是否正确切换
+- [ ] diary append 模式：手动 write_diary 是否正确追加、23:30 总结是否正常生成
+- [ ] 群友/NPC 边界：bot 是否不再将群友当成 NPC 回复

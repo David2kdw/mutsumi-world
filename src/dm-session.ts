@@ -10,7 +10,7 @@ import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules, loadSc
 import { createLLMClient, type LLMClient, type DMSession, type DMResponse } from "./llm-client.js";
 import { createLogger, type Logger } from "./logger.js";
 import { saveDMSession, loadDMSession } from "./dm-store.js";
-import { generateDiary } from "./diary.js";
+import { appendDiaryEntry } from "./diary.js";
 import { buildEventLookup, mergeEvent } from "./event-utils.js";
 import type { EventDef } from "./types.js";
 import * as path from "node:path";
@@ -182,7 +182,7 @@ function applyDMResponse(
   }
 }
 
-const TICK_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes
+const TICK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 
 /**
  * 将 DM session 的完整历史保存到本地文件。
@@ -277,7 +277,7 @@ export function startDMScheduler(
   api: OpenClawPluginApi,
   dataDir: string,
   workspaceDir: string,
-): { stop: () => void; handleObserve: () => Promise<string>; handleMoveTo: (location: string, reason?: string) => Promise<string>; handleEvent: (eventId: string, action?: string) => Promise<string>; handleWorldStatus: () => Promise<string>; handleWriteDiary: () => Promise<string> } {
+): { stop: () => void; handleMoveTo: (location: string, reason?: string) => Promise<string>; handleEvent: (eventId: string, action?: string) => Promise<string>; handleWorldStatus: () => Promise<string>; handleWriteDiary: (text: string) => Promise<string> } {
   const log: Logger = createLogger(dataDir, api.logger);
   log.info("DM scheduler starting", { dataDir });
 
@@ -294,6 +294,21 @@ export function startDMScheduler(
   let timer: ReturnType<typeof setInterval> | null = null;
   let midnightTimer: ReturnType<typeof setTimeout> | null = null;
   let diaryTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastDMTickTime: string | null = null;
+  const DM_TICK_COOLDOWN_MINUTES = 5;
+
+  function getMinutesSinceLastDMTick(currentTime: string): number {
+    if (!lastDMTickTime) return Infinity;
+    const [lh, lm] = lastDMTickTime.split(":").map(Number);
+    const [ch, cm] = currentTime.split(":").map(Number);
+    let gap = ch * 60 + cm - (lh * 60 + lm);
+    if (gap < 0) gap += 24 * 60;
+    return gap;
+  }
+
+  function markDMTick(time: string): void {
+    lastDMTickTime = time;
+  }
 
   function getTime(): string {
     const now = new Date();
@@ -358,9 +373,9 @@ export function startDMScheduler(
 
     const now = new Date();
     const nowMinutes = now.getHours() * 60 + now.getMinutes();
-    const [lastH, lastM] = (state.last_tick || "00:00").split(":").map(Number);
-    const lastMinutes = lastH * 60 + lastM;
-    let gapMs = (nowMinutes - lastMinutes) * 60 * 1000;
+    const [startH, startM] = state._mutsumi.position.started_at.split(":").map(Number);
+    const startMinutes = startH * 60 + startM;
+    let gapMs = (nowMinutes - startMinutes) * 60 * 1000;
     if (gapMs < 0) gapMs += 24 * 60 * 60 * 1000; // 跨午夜
     if (gapMs <= 0) return;
 
@@ -390,9 +405,6 @@ export function startDMScheduler(
     const time = getTime();
     const hour = new Date().getHours();
 
-    // 夜间不主动 tick
-    if (hour < 7 || hour >= 23) return;
-
     let state: WorldState;
     try {
       state = readWorld(dataDir);
@@ -402,6 +414,17 @@ export function startDMScheduler(
     }
 
     advanceTravelingIfNeeded(state);
+
+    // 夜间：有 traveling 或活跃事件才 tick，纯睡觉跳过
+    if (hour < 7 || hour >= 23) {
+      const hasActivity = state._mutsumi.position.type === "traveling"
+        || state._dm.active_events.length > 0;
+      if (!hasActivity) {
+        state.last_tick = time;
+        writeWorld(dataDir, state);
+        return;
+      }
+    }
 
     const ctx = buildTickContext(state, time, locations, network, npcs);
 
@@ -414,6 +437,7 @@ export function startDMScheduler(
     }
 
     state.last_tick = time;
+    markDMTick(time);
     writeWorld(dataDir, state);
   }
 
@@ -481,26 +505,23 @@ export function startDMScheduler(
       if (diaryTimer) clearTimeout(diaryTimer);
       if (dmSession) dmSession.close();
     },
-    async handleObserve(): Promise<string> {
-      const state = readWorld(dataDir);
-      advanceTravelingIfNeeded(state);
-      const time = getTime();
-      const ctx = buildTickContext(state, time, locations, network, npcs);
-      if (dmSession) {
-        const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米刚才观察了周围）";
-        const response = await dmSession.send(prompt);
-        applyDMResponse(state, response, time, eventLookup);
-        state.last_tick = time;
-        writeWorld(dataDir, state);
-        saveDMSessionState(dataDir, state.date, dmSession, log);
-        return state._dm.environment;
-      }
-      return state._dm.environment;
-    },
     async handleMoveTo(location: string, reason?: string): Promise<string> {
       // 由 tools.ts 调用
       const state = readWorld(dataDir);
+      const wasTraveling = state._mutsumi.position.type === "traveling";
+      advanceTravelingIfNeeded(state);
+      const arrived = wasTraveling && state._mutsumi.position.type === "location";
       const time = getTime();
+
+      // 如果上段 traveling 刚到达，强制触发到达场景 DM tick
+      if (arrived && dmSession) {
+        const ctx = buildTickContext(state, time, locations, network, npcs);
+        const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米刚到目的地，请描述到达时的场景。）";
+        const response = await dmSession.send(prompt);
+        applyDMResponse(state, response, time, eventLookup);
+        markDMTick(time);
+        log.info(`Arrival DM tick at ${state._mutsumi.position.type === "location" ? (state._mutsumi.position as {type:"location";name:string}).name : "?"} → ${response.environment || "(无)"}`);
+      }
 
       const currentLoc = state._mutsumi.position.type === "location"
         ? state._mutsumi.position.name
@@ -521,17 +542,50 @@ export function startDMScheduler(
         note: reason ? `出发去${location}：${reason}` : `出发去${location}`,
       });
 
+      // 出发场景 DM tick（强制）
       if (dmSession) {
         const prompt = `当前时间：${time}。睦子米刚从${currentLoc}出发去${location}${reason ? `（${reason}）` : ""}。请描述她动身离开${currentLoc}时的场景。不要描述目的地——她还没到。`;
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
         saveDMSessionState(dataDir, state.date, dmSession, log);
+        markDMTick(time);
       }
 
       state.last_tick = time;
       writeWorld(dataDir, state);
 
       const minutes = Math.round(route.estimatedMinutes);
+
+      // 预定到达时自动触发 tick（不等 10 分钟定时器）
+      const estimatedMs = Math.round(route.estimatedMinutes * 60 * 1000);
+      if (estimatedMs > 0 && estimatedMs < 60 * 60 * 1000) { // sanity: < 1 hour
+        const targetLocation = location;
+        setTimeout(async () => {
+          try {
+            let s: WorldState;
+            try { s = readWorld(dataDir); } catch { return; }
+            // 检查是否还在 traveling 同一段路（没被覆盖）
+            if (s._mutsumi.position.type !== "traveling" || s._mutsumi.position.to !== targetLocation) return;
+            advanceTravelingIfNeeded(s);
+            const t = getTime();
+            const pos = s._mutsumi.position as unknown as { type: string; name: string };
+            if (pos.type === "location" && dmSession) {
+              const ctx = buildTickContext(s, t, locations, network, npcs);
+              const prompt = buildDMTickPrompt(s, ctx, events) + "\n（睦子米到达了目的地，请描述到达时的场景。）";
+              const resp = await dmSession.send(prompt);
+              applyDMResponse(s, resp, t, eventLookup);
+              saveDMSessionState(dataDir, s.date, dmSession, log);
+              markDMTick(t);
+              log.info(`Scheduled arrival at ${targetLocation} → ${resp.environment || "(无)"}`);
+            }
+            s.last_tick = t;
+            writeWorld(dataDir, s);
+          } catch (err) {
+            log.warn(`Scheduled arrival tick failed: ${String(err)}`);
+          }
+        }, estimatedMs);
+      }
+
       return `正在从${currentLoc}去${location}的路上。步行约${minutes}分钟。`;
     },
     async handleEvent(eventId: string, action?: string): Promise<string> {
@@ -540,7 +594,13 @@ export function startDMScheduler(
       const time = getTime();
 
       const event = state._dm.active_events.find(e => e.id === eventId);
-      if (!event) return `事件 ${eventId} 不存在或已结束。`;
+      if (!event) {
+        const resolved = state._mutsumi.trajectory.some(
+          t => t.note === `事件结束：${eventId}`
+        );
+        if (resolved) return `事件「${eventId}」已经结束了。`;
+        return `事件 ${eventId} 不存在或已结束。`;
+      }
 
       const alreadyHandling = event.status === "处理中";
 
@@ -559,34 +619,41 @@ export function startDMScheduler(
       if (dmSession) {
         const dmPrompt = alreadyHandling
           ? `（睦子米继续处理事件「${event.name}」${action ? `：${action}` : ""}。）`
-          : `（睦子米开始处理事件「${event.name}」${action ? `：${action}` : ""}。请在合适的时机收束此事件。）`;
+          : `（睦子米开始处理事件「${event.name}」${action ? `：${action}` : ""}。先描述场景和NPC反应，不要立刻收束此事件。）`;
         const response = await dmSession.send(dmPrompt);
         applyDMResponse(state, response, time, eventLookup);
         saveDMSessionState(dataDir, state.date, dmSession, log);
         dmNarrative = response.environment ? ` — ${response.environment}` : "";
       }
 
+      // 检测事件是否在本次调用中被 DM 收束
+      const wasResolved = !state._dm.active_events.find(e => e.id === eventId);
+
       state.last_tick = time;
       writeWorld(dataDir, state);
 
       const prefix = alreadyHandling ? `继续处理「${event.name}」` : `处理「${event.name}」`;
-      return `${prefix}${dmNarrative}`;
+      return `${prefix}${dmNarrative}${wasResolved ? "（事件已结束）" : ""}`;
     },
     async handleWorldStatus(): Promise<string> {
       const state = readWorld(dataDir);
       advanceTravelingIfNeeded(state);
-      // 先触发一次 DM tick 刷新世界状态
       const time = getTime();
-      const ctx = buildTickContext(state, time, locations, network, npcs);
-      if (dmSession) {
+
+      // DM tick 仅在冷却时间外触发（连续观察不会反复扰动世界）
+      const shouldTick = getMinutesSinceLastDMTick(time) >= DM_TICK_COOLDOWN_MINUTES;
+      if (dmSession && shouldTick) {
+        const ctx = buildTickContext(state, time, locations, network, npcs);
         const prompt = buildDMTickPrompt(state, ctx, events);
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
-        state.last_tick = time;
-        writeWorld(dataDir, state);
         saveDMSessionState(dataDir, state.date, dmSession, log);
+        markDMTick(time);
         log.info(`world_status DM tick → ${response.environment || "(无声)"}`);
       }
+
+      state.last_tick = time;
+      writeWorld(dataDir, state);
 
       // 构建状态字符串
       const pos = state._mutsumi.position;
@@ -609,14 +676,14 @@ export function startDMScheduler(
         `${now.getMonth() + 1}月${now.getDate()}日 星期${dayNames[now.getDay()]}。` +
         `天气${state._dm.weather}。` +
         `位置：${posDesc}。` +
-        `今天：${trajSummary}` +
+        `\n环境：${state._dm.environment}` +
+        `\n今天：${trajSummary}` +
         (eventsSummary ? `\n活跃事件：${eventsSummary}` : "")
       );
     },
-    async handleWriteDiary(): Promise<string> {
-      const soulPath = path.join(workspaceDir, "SOUL.md");
-      await generateDiary(dataDir, workspaceDir, llmClient, soulPath);
-      return "日记已写完。";
+    async handleWriteDiary(text: string): Promise<string> {
+      await appendDiaryEntry(dataDir, workspaceDir, text);
+      return "记下了。";
     },
   };
 }

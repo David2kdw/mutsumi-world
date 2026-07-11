@@ -75,3 +75,54 @@ Restart Gateway to load: `openclaw gateway stop && openclaw gateway start`.
 ## Diary Chat Log Parsing
 
 Diary reads `~/.openclaw/agents/main/sessions/*.trajectory.jsonl` (including `.jsonl.reset.*` backups). Actual trajectory format uses `prompt.submitted` (user input, field `data.prompt`) and `model.completed` (assistant response, field `data.assistantTexts[]`), filtered by `ts` timestamp. Do NOT look for `type: "message"` — that format does not exist in OpenClaw trajectories.
+
+## DM → Mutsumi Notification Channel
+
+DM tick 结果可通过 `openclaw agent` CLI 推送到 QQ 群，触发睦子米主动回复。
+
+### 不可用的 API
+
+`api.session.workflow.scheduleSessionTurn()` — 仅对 `origin === "bundled"` 的内置插件生效。工作区插件（mutsumi-world）调用静默返回 `undefined`，不报错不做事。源码在 `openclaw/dist/registry-BXwW-HDh.js` 的 `schedulePluginSessionTurn` 函数第一行硬编码了这个限制。
+
+`api.session.workflow.enqueueNextTurnInjection()` — 没有 origin 限制，但**只注入上下文不触发回合**。下次有人 @ bot 时注入的文本会出现在上下文里。
+
+### 可用的 CLI
+
+```bash
+openclaw agent \
+  --session-key "agent:main:main" \
+  --channel qqbot \
+  --reply-to "qqbot:group:5B07AA16B5A5253C5B89E0021CF0CF15" \
+  --message "<DM通知内容>" \
+  --deliver
+```
+
+- `--session-key`: QQ bot 的 session key 是 `agent:main:main`（从 trajectory 文件确认，`messageProvider: qqbot`）
+- `--reply-to`: QQ Bot 要求 `qqbot:group:<group_id>` 或 `qqbot:c2c:<openid>` 格式
+- `--deliver`: 将 bot 回复发回 QQ
+- 从插件内调用需 `child_process.spawn`，因为插件运行在 Gateway 进程内无法直接调 CLI
+
+### Session Key
+
+当前 QQ 群 session: `agent:main:main`，群 ID: `5B07AA16B5A5253C5B89E0021CF0CF15`。
+
+### 如何获取 Session Key 和群 ID
+
+**Session Key** — 从 trajectory 文件查找：
+
+```bash
+# 找最新一条 qqbot session 的 sessionKey
+grep "session.started" ~/.openclaw/agents/main/sessions/*.trajectory.jsonl | \
+  tail -1 | node -e "process.stdin.on('data',d=>{const j=JSON.parse(d);console.log('sessionKey:',j.sessionKey,'| provider:',j.data?.messageProvider)})"
+```
+
+QQ bot 的 `messageProvider` 为 `qqbot`。Session key 格式为 `agent:<agent_id>:<routing_key>`。
+
+**群 ID** — 从 `~/.openclaw/openclaw.json` 的 channels.qqbot 配置中获取（如果没有显式配置 groups，需要从 QQ Bot 后台获取）。已知群 ID: `5B07AA16B5A5253C5B89E0021CF0CF15`。
+
+**验证 session key** — 确认 session 确实关联 QQ 群：
+
+```bash
+grep "session.started" ~/.openclaw/agents/main/sessions/<session-id>.trajectory.jsonl | \
+  head -1 | node -e "process.stdin.on('data',d=>{const j=JSON.parse(d);console.log(JSON.stringify({sessionKey:j.sessionKey,provider:j.data?.messageProvider,workspace:j.workspaceDir},null,2))})"
+```
