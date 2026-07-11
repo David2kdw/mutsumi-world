@@ -2,9 +2,17 @@
   "id": "openclaw-mutsumi-world",
   "name": "Mutsumi World",
   "description": "若叶睦「楚门的世界」世界模拟插件",
+  "activation": {
+    "onStartup": true
+  },
   "extensions": ["./preload.cjs"],
   "contracts": {
-    "tools": {}
+    "tools": [
+      "world_status",
+      "check_schedule",
+      "observe_surroundings",
+      "move_to"
+    ]
   },
   "configSchema": {},
   "capabilities": {}
