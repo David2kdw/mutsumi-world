@@ -10,7 +10,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch"
+    "dev": "tsc --watch",
+    "sync": "bash sync-to-openclaw.sh"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

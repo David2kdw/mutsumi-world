@@ -1,4 +1,4 @@
-import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk";
+import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 import { fileURLToPath } from "node:url";
 import { installDataFiles } from "./data-loader.js";
@@ -8,10 +8,7 @@ import { generateDiary } from "./diary.js";
 import { createLLMClient } from "./llm-client.js";
 import { createLogger } from "./logger.js";
 import * as path from "node:path";
-
-function getDataDir(runtime: PluginRuntime): string | undefined {
-  return (runtime as { getDataDir?: () => string }).getDataDir?.();
-}
+import * as os from "node:os";
 
 // 插件自身根目录（编译后在 dist/，回退一级到仓库根目录）
 const pluginDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -22,9 +19,8 @@ const plugin = {
   description: "若叶睦「楚门的世界」世界模拟插件",
   configSchema: emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
-    const baseDir = getDataDir(api.runtime) || process.env.HOME || process.env.USERPROFILE || ".";
     // OpenClaw workspace 固定路径：~/.openclaw/workspace（仅日记 memory 输出用）
-    const workspaceDir = path.join(baseDir, ".openclaw", "workspace");
+    const workspaceDir = path.join(os.homedir(), ".openclaw", "workspace");
     // world.json、日志、diaries 存档均放在插件自身目录
     const dataDir = pluginDir;
 
