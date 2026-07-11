@@ -1,0 +1,38 @@
+{
+  "spring": {
+    "months": [3, 4, 5],
+    "pool": [
+      { "type": "晴", "weight": 5 },
+      { "type": "多云", "weight": 3 },
+      { "type": "小雨", "weight": 2 },
+      { "type": "大风", "weight": 1 }
+    ]
+  },
+  "summer": {
+    "months": [6, 7, 8],
+    "pool": [
+      { "type": "晴", "weight": 6 },
+      { "type": "多云", "weight": 2 },
+      { "type": "小雨", "weight": 1 },
+      { "type": "雷阵雨", "weight": 2 }
+    ]
+  },
+  "autumn": {
+    "months": [9, 10, 11],
+    "pool": [
+      { "type": "晴", "weight": 4 },
+      { "type": "多云", "weight": 3 },
+      { "type": "小雨", "weight": 3 },
+      { "type": "大风", "weight": 2 }
+    ]
+  },
+  "winter": {
+    "months": [12, 1, 2],
+    "pool": [
+      { "type": "晴", "weight": 4 },
+      { "type": "多云", "weight": 3 },
+      { "type": "阴", "weight": 3 },
+      { "type": "雪", "weight": 1 }
+    ]
+  }
+}

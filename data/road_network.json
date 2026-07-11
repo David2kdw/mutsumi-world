@@ -1,0 +1,30 @@
+{
+  "nodes": [
+    { "id": "n1",  "coord": { "x": 0, "y": 0 } },
+    { "id": "n2",  "coord": { "x": -80, "y": 20 } },
+    { "id": "n3",  "coord": { "x": 60, "y": -30 } },
+    { "id": "n4",  "coord": { "x": 100, "y": 20 } },
+    { "id": "n5",  "coord": { "x": 120, "y": 30 } },
+    { "id": "n6",  "coord": { "x": 130, "y": 55 } },
+    { "id": "n7",  "coord": { "x": 150, "y": 80 } },
+    { "id": "n8",  "coord": { "x": 180, "y": 60 } },
+    { "id": "n9",  "coord": { "x": 220, "y": 50 } },
+    { "id": "n10", "coord": { "x": 130, "y": 90 } },
+    { "id": "n11", "coord": { "x": 170, "y": 120 } },
+    { "id": "n12", "coord": { "x": -30, "y": 40 } }
+  ],
+  "edges": [
+    { "from": "n1",  "to": "n4",  "distance": 100 },
+    { "from": "n2",  "to": "n4",  "distance": 180 },
+    { "from": "n3",  "to": "n4",  "distance": 60 },
+    { "from": "n4",  "to": "n5",  "distance": 25 },
+    { "from": "n5",  "to": "n6",  "distance": 28 },
+    { "from": "n6",  "to": "n7",  "distance": 30 },
+    { "from": "n6",  "to": "n8",  "distance": 50 },
+    { "from": "n8",  "to": "n9",  "distance": 55 },
+    { "from": "n7",  "to": "n10", "distance": 25 },
+    { "from": "n8",  "to": "n11", "distance": 62 },
+    { "from": "n5",  "to": "n12", "distance": 155 },
+    { "from": "n1",  "to": "n12", "distance": 45 }
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "丰川祥子": {
+    "display": "祥子",
+    "speed": 1.2,
+    "schedule": {
+      "weekday": [
+        { "time": "07:30", "from": "丰川家", "to": "校门", "activity": "上学" },
+        { "time": "08:00", "from": "校门", "to": "教室", "activity": "上课" },
+        { "time": "12:00", "from": "教室", "to": "中庭", "activity": "午休" },
+        { "time": "13:00", "from": "中庭", "to": "教室", "activity": "下午课" },
+        { "time": "15:30", "from": "教室", "to": "练习室", "activity": "练琴" },
+        { "time": "19:00", "from": "练习室", "to": "丰川家", "activity": "回家" }
+      ]
+    }
+  },
+  "长崎素世": {
+    "display": "素世",
+    "speed": 1.1,
+    "schedule": {
+      "weekday": [
+        { "time": "07:45", "from": "长崎家", "to": "校门", "activity": "上学" },
+        { "time": "08:00", "from": "校门", "to": "教室", "activity": "上课" },
+        { "time": "12:00", "from": "教室", "to": "中庭", "activity": "午休" },
+        { "time": "13:00", "from": "中庭", "to": "教室", "activity": "下午课" },
+        { "time": "15:30", "from": "教室", "to": "中庭", "activity": "发呆" },
+        { "time": "17:00", "from": "中庭", "to": "长崎家", "activity": "回家" }
+      ]
+    }
+  }
+}

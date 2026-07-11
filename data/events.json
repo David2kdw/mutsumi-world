@@ -1,0 +1,87 @@
+{
+  "菜园": [
+    {
+      "id": "aphids",
+      "name": "黄瓜蚜虫",
+      "type": "problem",
+      "rarity": "uncommon",
+      "description": "黄瓜叶子上出现了白色蚜虫。需要处理。",
+      "tags": ["植物", "问题"],
+      "resolve_hint": "可以捉虫、喷水或不管让瓢虫来"
+    },
+    {
+      "id": "stray_cat",
+      "name": "猫",
+      "type": "encounter",
+      "rarity": "rare",
+      "description": "一只花猫躺在黄瓜田旁边的石头上晒太阳。",
+      "tags": ["动物"],
+      "npc_optional": "花猫"
+    }
+  ],
+  "中庭": [
+    {
+      "id": "soyo_passing",
+      "name": "素世路过",
+      "type": "encounter",
+      "rarity": "uncommon",
+      "condition": "weekday AND lunch_break",
+      "description": "长崎素世路过中庭，看了看你又移开了视线。",
+      "tags": ["NPC", "CRYCHIC"],
+      "npc_required": ["长崎素世"]
+    },
+    {
+      "id": "cherry_petals",
+      "name": "樱花飘落",
+      "type": "ambient",
+      "rarity": "common",
+      "season": "spring",
+      "description": "樱花花瓣飘下来，落在长椅上。"
+    }
+  ],
+  "教室": [
+    {
+      "id": "pop_quiz",
+      "name": "突然小测",
+      "type": "event",
+      "rarity": "uncommon",
+      "description": "老师说突然有一个小测。全班叹气。"
+    }
+  ],
+  "音乐室": [
+    {
+      "id": "someone_playing",
+      "name": "有人在弹琴",
+      "type": "ambient",
+      "rarity": "common",
+      "description": "有低年级学生在练钢琴。弹得不太熟练但是很认真。"
+    }
+  ],
+  "家": [
+    {
+      "id": "parent_message",
+      "name": "母亲的留言",
+      "type": "event",
+      "rarity": "uncommon",
+      "description": "桌上有一张母亲美奈美留的纸条：「睦，这周都很忙。冰箱里有吃的。需要什么跟经纪人说。」"
+    },
+    {
+      "id": "tv_show",
+      "name": "父亲的节目",
+      "type": "ambient",
+      "rarity": "common",
+      "description": "电视开着，在放父亲隆文的综艺。观众在笑。睦关掉了。"
+    }
+  ],
+  "练习室": [
+    {
+      "id": "sakiko_new_score",
+      "name": "祥子改了谱子",
+      "type": "event",
+      "rarity": "uncommon",
+      "description": "丰川祥子改了练习用的谱子。节奏部分比以前更难了。",
+      "tags": ["NPC", "Ave Mujica"],
+      "npc_required": ["丰川祥子"]
+    }
+  ]
+}
