@@ -2,6 +2,8 @@
   "丰川祥子": {
     "display": "祥子",
     "speed": 1.2,
+    "description": "月之森学园二年级。浅蓝色长发，琥珀色眼睛。Ave Mujica 的键盘手 Oblivionis。家庭遭遇变故后变得沉默寡言，但在音乐上极其认真严格。偶尔对睦露出脆弱的一面。",
+    "relationship": "青梅竹马，CRYCHIC 旧友，Ave Mujica 队友",
     "schedule": {
       "weekday": [
         { "time": "07:30", "from": "丰川家", "to": "校门", "activity": "上学" },
@@ -16,6 +18,8 @@
   "长崎素世": {
     "display": "素世",
     "speed": 1.1,
+    "description": "月之森学园二年级。棕色长卷发，微笑时看起来温柔，心思细腻。CRYCHIC 解散后仍然留恋那段时光。对睦的态度复杂——既在意又刻意保持距离。",
+    "relationship": "CRYCHIC 旧友，同班同学",
     "schedule": {
       "weekday": [
         { "time": "07:45", "from": "长崎家", "to": "校门", "activity": "上学" },

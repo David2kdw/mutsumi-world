@@ -1,5 +1,6 @@
 import type { OpenClawPluginApi, PluginRuntime } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
+import { fileURLToPath } from "node:url";
 import { installDataFiles } from "./data-loader.js";
 import { startDMScheduler } from "./dm-session.js";
 import { registerTools } from "./tools.js";
@@ -12,6 +13,9 @@ function getDataDir(runtime: PluginRuntime): string | undefined {
   return (runtime as { getDataDir?: () => string }).getDataDir?.();
 }
 
+// 插件自身根目录（编译后在 dist/，回退一级到仓库根目录）
+const pluginDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 const plugin = {
   id: "openclaw-mutsumi-world",
   name: "Mutsumi World",
@@ -19,9 +23,10 @@ const plugin = {
   configSchema: emptyPluginConfigSchema(),
   register(api: OpenClawPluginApi) {
     const baseDir = getDataDir(api.runtime) || process.env.HOME || process.env.USERPROFILE || ".";
-    // OpenClaw workspace 固定路径：~/.openclaw/workspace
+    // OpenClaw workspace 固定路径：~/.openclaw/workspace（仅日记 memory 输出用）
     const workspaceDir = path.join(baseDir, ".openclaw", "workspace");
-    const dataDir = path.resolve(baseDir, "mutsumi-world");
+    // world.json、日志、diaries 存档均放在插件自身目录
+    const dataDir = pluginDir;
 
     const log = createLogger(dataDir, api.logger);
     log.info("Plugin registering", { dataDir, workspaceDir });

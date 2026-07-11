@@ -5,7 +5,15 @@ import { computeNPCStates } from "./npc-engine.js";
 import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules, loadScheduleTemplate, loadWeather } from "./data-loader.js";
 import { createLLMClient } from "./llm-client.js";
 import { createLogger } from "./logger.js";
-function buildDMSystemPrompt(rules, state) {
+function buildDMSystemPrompt(rules, state, npcs) {
+    const npcIntro = Object.entries(npcs).map(([id, def]) => {
+        const parts = [`${def.display}（${id}）`];
+        if (def.relationship)
+            parts.push(`与睦的关系：${def.relationship}`);
+        if (def.description)
+            parts.push(def.description);
+        return parts.join("\n  ");
+    }).join("\n\n");
     return `你是月之森女子学园世界的导演。你的职责是客观描述这个世界的运转。
 
 ${rules.tone}
@@ -21,7 +29,13 @@ ${rules.tone}
 当前日期：${state.date}（${state.day_type}）
 当日天气：${state._dm.weather}
 
-输出格式：严格返回 JSON 对象，包含以下字段：
+===== NPC 人物介绍 =====
+
+${npcIntro || "（暂无 NPC 数据）"}
+
+===== 输出格式 =====
+
+严格返回 JSON 对象，包含以下字段：
 {
   "action": "move" | "stay" | "event" | "none",
   "environment": "新的环境描述（1-3句）",
@@ -33,7 +47,9 @@ ${rules.tone}
 }
 
 如果没有事件，不编造。平淡的日子没关系。
-如果决定移动，给出理由。大部分日子不改日程。`;
+如果决定移动，给出理由。大部分日子不改日程。
+
+当写 NPC 偶遇叙事时，参考上方的 NPC 人物介绍，让对话和行为符合人设。`;
 }
 function buildDMTickPrompt(state, ctx, events) {
     const pos = state._mutsumi.position;
@@ -211,7 +227,7 @@ export function startDMScheduler(api, dataDir) {
         // 创建 DM session
         if (dmSession)
             dmSession.close();
-        const sysPrompt = buildDMSystemPrompt(rules, state);
+        const sysPrompt = buildDMSystemPrompt(rules, state, npcs);
         dmSession = llmClient.dmChat(sysPrompt);
         // 晨间 tick
         const ctx = buildTickContext(state, "07:00", locations, network, npcs);
@@ -284,10 +300,20 @@ export function startDMScheduler(api, dataDir) {
             morningRoutine().then(() => scheduleMorning());
         }, delay);
     }
-    // 崩溃恢复
+    // 启动时恢复或初始化世界
     (async () => {
-        const state = await recoverFromCrash(dataDir, locations, network, npcs);
-        if (state) {
+        let state = await recoverFromCrash(dataDir, locations, network, npcs);
+        if (!state) {
+            // 没有 world.json（首次启动或非晨间时间）→ 创建初始世界，位置默认"家"
+            const date = getDate();
+            const dayType = getDayType(date);
+            state = createEmptyWorld(date, dayType);
+            state._dm.weather = pickWeather();
+            state._dm.schedule = expandSchedule(loadScheduleTemplate(), date);
+            writeWorld(dataDir, state);
+            log.info(`World initialized: ${date} (${dayType}), weather: ${state._dm.weather}, at home`);
+        }
+        else {
             log.info(`Recovered from crash. Last tick was ${state.last_tick}`);
         }
     })();

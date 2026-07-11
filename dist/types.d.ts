@@ -110,6 +110,10 @@ export interface NPCDef {
     display: string;
     speed: number;
     schedule: Record<string, NPCScheduleEntry[]>;
+    /** 人物简介：外貌、性格、背景（供 DM 写叙事参考） */
+    description?: string;
+    /** 与若叶睦的关系：如 "CRYCHIC 键盘手"、"同班同学" */
+    relationship?: string;
 }
 export interface NPCScheduleEntry {
     time: string;
