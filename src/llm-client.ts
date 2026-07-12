@@ -1,23 +1,27 @@
 export interface DMResponse {
-  action: "move" | "stay" | "event" | "none";
+  action: "move" | "stay" | "none";
   environment?: string;
-  event?: {
-    id: string;
+  // Activity: DM self-initiates via activity_plan
+  activity_plan?: {
     name: string;
-    type?: string;
-    rarity?: string;
-    description?: string;
     location: string;
-    status: string;
-    tags?: string[];
-    resolve_hint?: string;
-    npc_optional?: string;
-    npc_required?: string[];
-    condition?: string;
-    season?: string;
+    duration_minutes: number;
+    initial_brief: string;
+    interludes: Array<{
+      time_minutes: number;
+      description: string;
+    }>;
   };
-  event_note?: string;
-  resolve_event_id?: string;
+  // Activity: Mutsumi requests DM to plan (DM returns "plan" key)
+  plan?: {
+    name: string;
+    duration_minutes: number;
+    initial_brief: string;
+    interludes: Array<{
+      time_minutes: number;
+      description: string;
+    }>;
+  };
   move_to?: string;
   departure_note?: string;
   /** DM 填写此字段时，插件会通过 openclaw agent CLI 通知睦子米（不发到 QQ，只触发工具调用）。留 null 则 silent tick。 */
