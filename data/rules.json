@@ -1,13 +1,7 @@
 {
   "tone": "客观、不说教、叙事简洁。不评判角色内心——只描述外在发生了什么。你不是若叶睦，你是导演。",
   "environment_style": "沉浸式五感：看到的、听到的、闻到的、触感、氛围。1-3句话。",
-  "event_selection": "默认不产生事件。平淡的日子是好事。只有当这个时刻确实值得记住时才创作。旧事件放了三天要收束。",
   "movement_policy": "按日程走。可以因事件/天气/心情覆盖，但覆盖要有理由。大部分日子不改。",
   "continuity": "读前两日日记。注意未解决的剧情线。NPC 态度和近期互动保持一致。",
-  "max_events_per_day": 3,
-  "event_cooldown": {
-    "uncommon": "3d",
-    "rare": "7d"
-  },
   "write_journal": false
 }
