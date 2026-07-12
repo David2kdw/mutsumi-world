@@ -65,7 +65,9 @@ ${npcIntro || "（暂无 NPC 数据）"}
 填写 notify_mutsumi 的场景：
 - 睦子米到达目的地了（告诉她周围有什么，她可能想记日记或探索）
 - 新事件出现了（NPC 靠近、纸条、异常——她需要知道才能处理）
-- 下一段日程该出发了（提前几分钟提醒路线，让她自己决定是否 move_to）
+- **下一段日程快到了**（当距离下一段日程开始 ≤ 15 分钟时，提醒睦子米：
+  "下一段是 [HH:MM]-[HH:MM] [地点] | [内容]。路程约 X 分钟，该准备出发了。"
+  如果她已经在目标地点则不用提醒）
 - 事件收束了（告诉她结果）
 - 环境发生显著变化（天气突变、铃声响起等）
 
@@ -730,11 +732,18 @@ export function startDMScheduler(
       const now = new Date();
       const dayNames = ["日", "一", "二", "三", "四", "五", "六"];
 
+      // 下一段日程
+      const nextSegment = findNextSegment(state._dm.schedule, time);
+      const nextScheduleLine = nextSegment
+        ? `\n下一段日程：${nextSegment.start}-${nextSegment.end} ${nextSegment.location} | ${nextSegment.activity}`
+        : "";
+
       return (
         `${now.getMonth() + 1}月${now.getDate()}日 星期${dayNames[now.getDay()]}。` +
         `天气${state._dm.weather}。` +
         `位置：${posDesc}。` +
         `\n环境：${state._dm.environment}` +
+        nextScheduleLine +
         `\n今天：${trajSummary}` +
         (eventsSummary ? `\n活跃事件：${eventsSummary}` : "")
       );

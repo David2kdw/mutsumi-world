@@ -16,7 +16,8 @@ export function createEmptyWorld(date: string, dayType: "weekday" | "saturday" |
       weather: "",
       schedule: [],
       environment: "",
-      active_events: [],
+      active_activity: null,
+      dm_activity_count: 0,
     },
     _mutsumi: {
       position: { type: "location", name: "家" },
