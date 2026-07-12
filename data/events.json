@@ -21,16 +21,6 @@
   ],
   "中庭": [
     {
-      "id": "soyo_passing",
-      "name": "素世路过",
-      "type": "encounter",
-      "rarity": "uncommon",
-      "condition": "weekday AND lunch_break",
-      "description": "长崎素世路过中庭，看了看你又移开了视线。",
-      "tags": ["NPC", "CRYCHIC"],
-      "npc_required": ["长崎素世"]
-    },
-    {
       "id": "cherry_petals",
       "name": "樱花飘落",
       "type": "ambient",

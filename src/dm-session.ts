@@ -13,10 +13,6 @@ import { saveDMSession, loadDMSession } from "./dm-store.js";
 import { appendDiaryEntry } from "./diary.js";
 import { buildEventLookup, mergeEvent } from "./event-utils.js";
 import type { EventDef } from "./types.js";
-import * as path from "node:path";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import { spawn } from "node:child_process";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 function buildDMSystemPrompt(rules: RulesData, state: WorldState, npcs: NPCsData): string {
@@ -160,36 +156,27 @@ function buildTickContext(
 
 const QQ_SESSION_KEY = "agent:main:main";
 const QQ_GROUP_ID = "5B07AA16B5A5253C5B89E0021CF0CF15";
-const OPENCLAW_BIN = process.platform === "win32"
-  ? "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\openclaw.cmd"
-  : "openclaw";
 
-/** 通过 openclaw agent CLI 通知睦子米（不加 --deliver，bot 只调工具不说话）。 */
-function notifyMutsumi(message: string, log: Logger): void {
+/** 通过 scheduleSessionTurn API 通知睦子米（deliveryMode=none，bot 只调工具不说话）。 */
+function notifyMutsumi(api: OpenClawPluginApi, message: string, log: Logger): void {
   const fullMessage = `[DM 世界通知]\n${message}\n\n（系统通知，无需回复。如需行动直接使用工具。）`;
   try {
-    // 写临时文件避免 shell 转义问题
-    const tmpFile = path.join(os.tmpdir(), `mutsumi-notify-${Date.now()}.txt`);
-    fs.writeFileSync(tmpFile, fullMessage, "utf-8");
-    const args = [
-      "agent",
-      "--session-key", QQ_SESSION_KEY,
-      "--channel", "qqbot",
-      "--reply-to", `qqbot:group:${QQ_GROUP_ID}`,
-      "--message-file", tmpFile,
-      // 不加 --deliver：bot 处理消息、调工具，但不发文字到 QQ 群
-    ];
-    const spawnArgs = process.platform === "win32"
-      ? ["/c", OPENCLAW_BIN, ...args]
-      : args;
-    const spawnCmd = process.platform === "win32" ? "cmd.exe" : OPENCLAW_BIN;
-    const proc = spawn(spawnCmd, spawnArgs, { stdio: "ignore", detached: true });
-    proc.unref();
-    // 1 分钟后清理临时文件
-    setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch { /* ignore */ } }, 60_000);
-    log.info(`DM notify → ${message.slice(0, 80)}${message.length > 80 ? "…" : ""}`);
+    const result = api.session.workflow.scheduleSessionTurn({
+      sessionKey: QQ_SESSION_KEY,
+      message: fullMessage,
+      delayMs: 2000,
+      deliveryMode: "none",
+    });
+    // 同步部分可能已经返回 undefined，先记一条
+    log.info(`DM notify → scheduleSessionTurn called (result pending)`);
+    // 异步等结果看是成功还是被 guard 吞了
+    result.then((job) => {
+      log.info(`DM notify result: ${job ? `job=${job.id}` : "UNDEFINED (被 guard 拦截)"}`);
+    }).catch((err) => {
+      log.warn(`DM notify result error: ${String(err)}`);
+    });
   } catch (err) {
-    log.warn(`DM notify spawn failed: ${String(err)}`);
+    log.warn(`DM notify failed: ${String(err)}`);
   }
 }
 
@@ -336,7 +323,7 @@ export function startDMScheduler(
   api: OpenClawPluginApi,
   dataDir: string,
   workspaceDir: string,
-): { stop: () => void; handleMoveTo: (location: string, reason?: string) => Promise<string>; handleEvent: (eventId: string, action?: string) => Promise<string>; handleWorldStatus: (recentChat?: string) => Promise<string>; handleWriteDiary: (text: string) => Promise<string> } {
+): { stop: () => void; handleMoveTo: (location: string, reason?: string) => Promise<string>; handleEvent: (eventId: string, action?: string) => Promise<string>; handleWorldStatus: (recentChat?: string) => Promise<string>; handleWriteDiary: (text: string) => Promise<string>; handleTestNotify: () => string } {
   const log: Logger = createLogger(dataDir, api.logger);
   log.info("DM scheduler starting", { dataDir });
 
@@ -420,7 +407,7 @@ export function startDMScheduler(
     log.info(`DM midnight → ${response.environment || "(无环境描述)"}${response.notify_mutsumi ? " [🔔 notify]" : " [🔇 silent]"}`);
 
     applyDMResponse(state, response, time, eventLookup);
-    if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
+    if (response.notify_mutsumi) notifyMutsumi(api, response.notify_mutsumi, log);
     state.last_tick = time;
     writeWorld(dataDir, state);
     saveDMSessionState(dataDir, date, dmSession, log);
@@ -493,7 +480,7 @@ export function startDMScheduler(
       const response = await dmSession.send(prompt);
       log.info(`Tick ${time} → ${response.environment || "(无声)"}${response.event ? ` [事件: ${response.event.name}]` : ""}${response.notify_mutsumi ? ` [🔔 notify]` : " [🔇 silent]"}`);
       applyDMResponse(state, response, time, eventLookup);
-      if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
+      if (response.notify_mutsumi) notifyMutsumi(api, response.notify_mutsumi, log);
       saveDMSessionState(dataDir, state.date, dmSession, log);
     }
 
@@ -585,7 +572,7 @@ export function startDMScheduler(
         const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米刚到目的地，请描述到达时的场景。）";
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
-        if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
+        if (response.notify_mutsumi) notifyMutsumi(api, response.notify_mutsumi, log);
         markDMTick(time);
         log.info(`Arrival DM tick at ${state._mutsumi.position.type === "location" ? (state._mutsumi.position as {type:"location";name:string}).name : "?"} → ${response.environment || "(无)"}${response.notify_mutsumi ? " [🔔 notify]" : " [🔇 silent]"}`);
       }
@@ -614,7 +601,7 @@ export function startDMScheduler(
         const prompt = `当前时间：${time}。睦子米刚从${currentLoc}出发去${location}${reason ? `（${reason}）` : ""}。请描述她动身离开${currentLoc}时的场景。不要描述目的地——她还没到。`;
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
-        if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
+        if (response.notify_mutsumi) notifyMutsumi(api, response.notify_mutsumi, log);
         saveDMSessionState(dataDir, state.date, dmSession, log);
         markDMTick(time);
       }
@@ -642,7 +629,7 @@ export function startDMScheduler(
               const prompt = buildDMTickPrompt(s, ctx, events) + "\n（睦子米到达了目的地，请描述到达时的场景。）";
               const resp = await dmSession.send(prompt);
               applyDMResponse(s, resp, t, eventLookup);
-              if (resp.notify_mutsumi) notifyMutsumi(resp.notify_mutsumi, log);
+              if (resp.notify_mutsumi) notifyMutsumi(api, resp.notify_mutsumi, log);
               saveDMSessionState(dataDir, s.date, dmSession, log);
               markDMTick(t);
               log.info(`Scheduled arrival at ${targetLocation} → ${resp.environment || "(无)"}${resp.notify_mutsumi ? " [🔔 notify]" : " [🔇 silent]"}`);
@@ -691,7 +678,7 @@ export function startDMScheduler(
           : `（睦子米开始处理事件「${event.name}」${action ? `：${action}` : ""}。先描述场景和NPC反应，不要立刻收束此事件。）`;
         const response = await dmSession.send(dmPrompt);
         applyDMResponse(state, response, time, eventLookup);
-        if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
+        if (response.notify_mutsumi) notifyMutsumi(api, response.notify_mutsumi, log);
         saveDMSessionState(dataDir, state.date, dmSession, log);
         dmNarrative = response.environment ? ` — ${response.environment}` : "";
       }
@@ -755,6 +742,11 @@ export function startDMScheduler(
     async handleWriteDiary(text: string): Promise<string> {
       await appendDiaryEntry(dataDir, workspaceDir, text);
       return "记下了。";
+    },
+    // 临时测试工具：手动触发 DM 通知
+    handleTestNotify(): string {
+      notifyMutsumi(api, "这是一条测试通知。收到后用 write_diary 工具写一条日记：「今天收到了DM的测试通知，系统运转正常。」", log);
+      return "测试通知已发送。";
     },
   };
 }

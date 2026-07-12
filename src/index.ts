@@ -1,7 +1,6 @@
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 import { emptyPluginConfigSchema } from "openclaw/plugin-sdk";
 import { fileURLToPath } from "node:url";
-import { installDataFiles } from "./data-loader.js";
 import { startDMScheduler } from "./dm-session.js";
 import { registerTools } from "./tools.js";
 import { generateDiary } from "./diary.js";
@@ -28,9 +27,6 @@ const plugin = {
 
     const log = createLogger(dataDir, api.logger);
     log.info("Plugin registering", { dataDir, workspaceDir });
-
-    // 首次安装：复制数据文件
-    installDataFiles(workspaceDir);
 
     // 调度器和日记定时器只启动一次，但工具每次 register 都要注册
     if (!_started) {

@@ -86,6 +86,7 @@
 ### DM → Mutsumi 通知通道
 - [x] DM system prompt 加 `notify_mutsumi` 字段 + 通知时机指南（2026-07-12）
 - [x] `applyDMResponse` 7 个调用点检测 `response.notify_mutsumi` → spawn `openclaw agent`（不加 `--deliver`，bot 只调工具不说话）（2026-07-12）
+- [x] 通知通道重构：spawn fork bomb → `api.session.workflow.scheduleSessionTurn`（delayMs=2s, deliveryMode=none），零子进程（2026-07-12）
 - [x] `recent_chat` 参数：`world_status` 工具 → `handleWorldStatus` → `buildDMTickPrompt` → DM 看到群聊上下文（2026-07-12）
 - [x] DM session 恢复时替换旧 system prompt 以应用最新指引（2026-07-12）
 - [x] E2E 验证：`openclaw agent` 不加 `--deliver` → bot 调了 `write_diary`，QQ 群无消息（2026-07-12）
@@ -100,6 +101,7 @@
 - [x] 终端窗口不关闭：`shell: true` → `cmd.exe /c`，执行完自动关窗（2026-07-12）
 - [x] parseJSONResponse 增强：宽松 markdown fence + regex 提取 `{...}` + 失败返回 `"(DM 输出格式异常)"`（2026-07-12）
 - [x] 僵尸进程清理：15 个 node 进程 → 全杀 + 单实例确认（2026-07-12）
+- [x] Fork bomb：notify spawn `openclaw agent` → 子进程启动第二个世界引擎 → spawn 更多子进程。改为 `scheduleSessionTurn` API，需 5 处 dist 补丁（2026-07-12）
 
 ### 日志改进
 - [x] 所有 DM tick 日志加 `[🔔 notify]` / `[🔇 silent]` / `[🔇 skip notify]` 标记（2026-07-12）
@@ -113,7 +115,7 @@ _无进行中项目。_
 
 ## 下一任接手第一句话
 
-通知通道已经完整实现并生产验证。DM 自主决定 notify_mutsumi，代码 spawn `cmd.exe /c openclaw agent --message-file` 推送（不加 --deliver）。DM 能看到 `[🔔 notify]` 日志，bot 收到后自发改工具不吭声。群 session key: agent:main:qqbot:group:5b07aa16…，reset: 删 sessions/ UUID 文件 + sessions.json。潜在问题：notify spawn 后 gateway 偶尔 crash（看日志有 3 次 recoverFromCrash），可能与工具并发调用有关，待排查。
+通知通道已从 spawn 重构为 `api.session.workflow.scheduleSessionTurn`，不再有 fork bomb。需维护 dist 补丁 `registry-BXwW-HDh.js`（详见 `~/.openclaw/patches/`）。dm_test_notify 工具源码保留但 contracts 未注册，测试时加回即可。
 
 ## Bug
 

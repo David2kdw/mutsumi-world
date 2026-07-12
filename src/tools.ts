@@ -173,5 +173,22 @@ export function registerTools(
     },
   });
 
-  api.logger?.info?.("[mutsumi-world] 5 tools registered");
+  // ====== dm_test_notify（临时测试） ======
+  api.registerTool({
+    name: "dm_test_notify",
+    label: "测试DM通知",
+    description: "【临时】测试 scheduleSessionTurn 补丁是否生效。触发一条 DM 通知。",
+    parameters: { type: "object", properties: {} },
+    async execute() {
+      log.info("睦子米触发测试通知");
+      try {
+        const result = scheduler.handleTestNotify();
+        return textResult(result);
+      } catch (err) {
+        return textResult(`测试失败：${err instanceof Error ? err.message : ""}`);
+      }
+    },
+  });
+
+  api.logger?.info?.("[mutsumi-world] 6 tools registered");
 }
