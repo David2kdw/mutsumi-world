@@ -1,18 +1,17 @@
 import type {
   WorldState, ScheduleEntry, RouteResult, NPCState,
-  Position, RulesData, TickContext, EventsData, NPCsData,
+  Position, RulesData, TickContext, NPCsData,
+  Activity,
 } from "./types.js";
 import { readWorld, writeWorld, appendTrajectory, createEmptyWorld } from "./world-state.js";
 import { findRoute, advanceTraveling } from "./map-engine.js";
 import { findCurrentSegment, findNextSegment, expandSchedule, getDayType } from "./schedule-engine.js";
 import { computeNPCStates } from "./npc-engine.js";
-import { loadLocations, loadRoadNetwork, loadNPCs, loadEvents, loadRules, loadScheduleTemplate, loadWeather } from "./data-loader.js";
+import { loadLocations, loadRoadNetwork, loadNPCs, loadRules, loadScheduleTemplate, loadWeather } from "./data-loader.js";
 import { createLLMClient, type LLMClient, type DMSession, type DMResponse } from "./llm-client.js";
 import { createLogger, type Logger } from "./logger.js";
 import { saveDMSession, loadDMSession } from "./dm-store.js";
 import { appendDiaryEntry } from "./diary.js";
-import { buildEventLookup, mergeEvent } from "./event-utils.js";
-import type { EventDef } from "./types.js";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 function buildDMSystemPrompt(rules: RulesData, state: WorldState, npcs: NPCsData): string {
@@ -227,8 +226,7 @@ function applyDMResponse(
   state: WorldState,
   response: DMResponse,
   time: string,
-  eventLookup: Map<string, EventDef>,
-): void {
+): Activity | null {
   // 更新环境
   if (response.environment) {
     state._dm.environment = response.environment;
@@ -236,39 +234,36 @@ function applyDMResponse(
 
   // 处理移动决策
   if (response.action === "move" && response.move_to) {
-    // 标记出发
     if (response.departure_note) {
       appendTrajectory(state, { time, note: response.departure_note });
     }
-    // DM 只决定目的地，代码负责执行
-    // 实际的 traveling 状态由 tools.ts 的 move_to 或 tick 调度设置
   }
 
-  // 叙事笔记（无论是否有事件都记入轨迹，但 prompt 要求 event 不为 null 才填）
-  if (response.event_note) {
-    appendTrajectory(state, { time, note: response.event_note });
+  // 处理 DM 主动发起的 activity_plan
+  if (response.activity_plan) {
+    const plan = response.activity_plan;
+    const activity: Activity = {
+      id: `act-${Date.now()}`,
+      name: plan.name,
+      brief: plan.initial_brief,
+      status: "pending",
+      initiator: "dm",
+      location: plan.location,
+      duration_minutes: plan.duration_minutes,
+      elapsed_minutes: 0,
+      started_at: "",
+      created_at: time,
+      interludes: (plan.interludes || []).map((il, i) => ({
+        id: String(i + 1),
+        time_minutes: il.time_minutes,
+        description: il.description,
+        handled: false,
+      })).sort((a, b) => a.time_minutes - b.time_minutes),
+    };
+    return activity;
   }
 
-  // 处理事件：合并预定义数据，统一为完整 GameEvent
-  if (response.event) {
-    const merged = mergeEvent(response.event, eventLookup);
-    merged.created_at = time;
-    const existing = state._dm.active_events.find(e => e.id === merged.id);
-    if (existing) {
-      // DM 更新了已有事件（补充描述、推进状态等）→ 合并
-      Object.assign(existing, merged);
-    } else {
-      state._dm.active_events.push(merged);
-    }
-  }
-
-  // 收束事件
-  if (response.resolve_event_id) {
-    state._dm.active_events = state._dm.active_events.filter(
-      e => e.id !== response.resolve_event_id
-    );
-    appendTrajectory(state, { time, note: `事件结束：${response.resolve_event_id}` });
-  }
+  return null;
 }
 
 const TICK_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
@@ -375,8 +370,6 @@ export function startDMScheduler(
   const network = loadRoadNetwork();
   const npcs = loadNPCs();
   const rules = loadRules();
-  const events = loadEvents();
-  const eventLookup = buildEventLookup(events);
   const weather = loadWeather();
 
   let dmSession: DMSession | null = null;
@@ -445,7 +438,7 @@ export function startDMScheduler(
 
     const time = getTime();
     const ctx = buildTickContext(state, time, locations, network, npcs);
-    const prompt = `（系统：新的一天开始了。）\n\n${buildDMTickPrompt(state, ctx, events)}`;
+    const prompt = `（系统：新的一天开始了。）\n\n${buildDMTickPrompt(state, ctx)}`;
     const response = await dmSession.send(prompt);
     log.info(`DM midnight → ${response.environment || "(无环境描述)"}${response.notify_mutsumi ? " [🔔 notify]" : " [🔇 silent]"}`);
 
@@ -519,9 +512,9 @@ export function startDMScheduler(
     const ctx = buildTickContext(state, time, locations, network, npcs);
 
     if (dmSession) {
-      const prompt = `（系统定时推进世界。这轮 tick 是自主发起的——如有值得通知睦子米的事，使用 notify_mutsumi。）\n\n${buildDMTickPrompt(state, ctx, events)}`;
+      const prompt = `（系统定时推进世界。这轮 tick 是自主发起的——如有值得通知睦子米的事，使用 notify_mutsumi。）\n\n${buildDMTickPrompt(state, ctx)}`;
       const response = await dmSession.send(prompt);
-      log.info(`Tick ${time} → ${response.environment || "(无声)"}${response.event ? ` [事件: ${response.event.name}]` : ""}${response.notify_mutsumi ? ` [🔔 notify]` : " [🔇 silent]"}`);
+      log.info(`Tick ${time} → ${response.environment || "(无声)"}${response.notify_mutsumi ? ` [🔔 notify]` : " [🔇 silent]"}`);
       applyDMResponse(state, response, time, eventLookup);
       if (response.notify_mutsumi) notifyMutsumi(api, response.notify_mutsumi, log);
       saveDMSessionState(dataDir, state.date, dmSession, log);
@@ -612,7 +605,7 @@ export function startDMScheduler(
       // 如果上段 traveling 刚到达，强制触发到达场景 DM tick
       if (arrived && dmSession) {
         const ctx = buildTickContext(state, time, locations, network, npcs);
-        const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米刚到目的地，请描述到达时的场景。）";
+        const prompt = buildDMTickPrompt(state, ctx) + "\n（睦子米刚到目的地，请描述到达时的场景。）";
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
         if (response.notify_mutsumi) notifyMutsumi(api, response.notify_mutsumi, log);
@@ -669,7 +662,7 @@ export function startDMScheduler(
             const pos = s._mutsumi.position as unknown as { type: string; name: string };
             if (pos.type === "location" && dmSession) {
               const ctx = buildTickContext(s, t, locations, network, npcs);
-              const prompt = buildDMTickPrompt(s, ctx, events) + "\n（睦子米到达了目的地，请描述到达时的场景。）";
+              const prompt = buildDMTickPrompt(s, ctx) + "\n（睦子米到达了目的地，请描述到达时的场景。）";
               const resp = await dmSession.send(prompt);
               applyDMResponse(s, resp, t, eventLookup);
               if (resp.notify_mutsumi) notifyMutsumi(api, resp.notify_mutsumi, log);
@@ -744,7 +737,7 @@ export function startDMScheduler(
       const shouldTick = getMinutesSinceLastDMTick(time) >= DM_TICK_COOLDOWN_MINUTES;
       if (dmSession && shouldTick) {
         const ctx = buildTickContext(state, time, locations, network, npcs);
-        const prompt = `（睦子米查看了世界状态——她主动发起的，不需要 notify_mutsumi。）\n\n${buildDMTickPrompt(state, ctx, events, recentChat)}`;
+        const prompt = `（睦子米查看了世界状态——她主动发起的，不需要 notify_mutsumi。）\n\n${buildDMTickPrompt(state, ctx, recentChat)}`;
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
         // world_status 不 notify（睦子米主动查的，她已经知道结果了）
