@@ -3,7 +3,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type {
   LocationsData, RoadNetwork, ScheduleTemplate,
-  WeatherData, EventsData, NPCsData, RulesData,
+  WeatherData, NPCsData, RulesData,
 } from "./types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -30,10 +30,6 @@ export function loadWeather(): WeatherData {
   return readJSON<WeatherData>(path.join(DATA_DIR, "weather.json"));
 }
 
-export function loadEvents(): EventsData {
-  return readJSON<EventsData>(path.join(DATA_DIR, "events.json"));
-}
-
 export function loadNPCs(): NPCsData {
   return readJSON<NPCsData>(path.join(DATA_DIR, "npcs.json"));
 }
@@ -52,7 +48,7 @@ export function installDataFiles(workspaceDir: string): void {
 
   const files = [
     "locations.json", "road_network.json", "schedule.json",
-    "weather.json", "events.json", "npcs.json", "rules.json",
+    "weather.json", "npcs.json", "rules.json",
   ];
 
   for (const file of files) {
