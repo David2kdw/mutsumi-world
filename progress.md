@@ -80,13 +80,40 @@
 ### DM 通知通道调研
 - [x] scheduleSessionTurn 仅 bundled 插件可用，工作区插件 return silently（2026-07-12）
 - [x] enqueueNextTurnInjection 无限制但只注入不触发回合（2026-07-12）
-- [x] openclaw agent CLI 可触发回合：`openclaw agent --session-key "agent:main:main" --channel qqbot --reply-to "qqbot:group:5B07AA16B5A5253C5B89E0021CF0CF15" --message "..." --deliver`（2026-07-12）
+- [x] openclaw agent CLI 可触发回合（2026-07-12）
 - [x] QQ session key: `agent:main:main`，群 ID: `5B07AA16B5A5253C5B89E0021CF0CF15`（2026-07-12）
+
+### DM → Mutsumi 通知通道
+- [x] DM system prompt 加 `notify_mutsumi` 字段 + 通知时机指南（2026-07-12）
+- [x] `applyDMResponse` 7 个调用点检测 `response.notify_mutsumi` → spawn `openclaw agent`（不加 `--deliver`，bot 只调工具不说话）（2026-07-12）
+- [x] `recent_chat` 参数：`world_status` 工具 → `handleWorldStatus` → `buildDMTickPrompt` → DM 看到群聊上下文（2026-07-12）
+- [x] DM session 恢复时替换旧 system prompt 以应用最新指引（2026-07-12）
+- [x] E2E 验证：`openclaw agent` 不加 `--deliver` → bot 调了 `write_diary`，QQ 群无消息（2026-07-12）
+- [x] recent_chat 全链路验证：DM session 中出现群聊上下文（2026-07-12）
+- [x] DM prompt 来源标记：定时 tick/世界推进 鼓励 notify，睦子米主动查 world_status 跳过 notify（2026-07-12）
+- [x] 群聊上下文隔离：prompt 明确标注「不要编进环境叙事」，防止 DM 幻觉群聊消息（2026-07-12）
+- [x] 生产验证：DM 在 17:07 和 17:22 成功通知，bot 收到后自发给 move_to 家、write_diary、handle_event 热饭（2026-07-12）
+
+### DM 通知通道 Bug 修复
+- [x] spawn ENOENT：Scheduled Task 无 PATH → 改用完整路径 `C:\Users\...\npm\openclaw.cmd`（2026-07-12）
+- [x] spawn EINVAL：`--message` 含特殊字符 → 改用 `--message-file` 临时文件（2026-07-12）
+- [x] 终端窗口不关闭：`shell: true` → `cmd.exe /c`，执行完自动关窗（2026-07-12）
+- [x] parseJSONResponse 增强：宽松 markdown fence + regex 提取 `{...}` + 失败返回 `"(DM 输出格式异常)"`（2026-07-12）
+- [x] 僵尸进程清理：15 个 node 进程 → 全杀 + 单实例确认（2026-07-12）
+
+### 日志改进
+- [x] 所有 DM tick 日志加 `[🔔 notify]` / `[🔇 silent]` / `[🔇 skip notify]` 标记（2026-07-12）
+
+### 群 session 管理
+- [x] QQ 群 session 重置方法：删 trajectory 文件 + sessions.json 记录（2026-07-12）
 
 ## 进行中
 
-- [ ] DM → Mutsumi 通知通道：DM response 加 `notify_mutsumi` 字段，spawn openclaw agent 推送到 QQ（2026-07-12）
-- [ ] DM prompt 加聊天上下文：world_status 加 `recent_chat` 参数，注入 DM tick prompt（2026-07-12）
+_无进行中项目。_
+
+## 下一任接手第一句话
+
+通知通道已经完整实现并生产验证。DM 自主决定 notify_mutsumi，代码 spawn `cmd.exe /c openclaw agent --message-file` 推送（不加 --deliver）。DM 能看到 `[🔔 notify]` 日志，bot 收到后自发改工具不吭声。群 session key: agent:main:qqbot:group:5b07aa16…，reset: 删 sessions/ UUID 文件 + sessions.json。潜在问题：notify spawn 后 gateway 偶尔 crash（看日志有 3 次 recoverFromCrash），可能与工具并发调用有关，待排查。
 
 ## Bug
 

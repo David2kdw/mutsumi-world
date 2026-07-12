@@ -14,6 +14,9 @@ import { appendDiaryEntry } from "./diary.js";
 import { buildEventLookup, mergeEvent } from "./event-utils.js";
 import type { EventDef } from "./types.js";
 import * as path from "node:path";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import { spawn } from "node:child_process";
 import type { OpenClawPluginApi } from "openclaw/plugin-sdk";
 
 function buildDMSystemPrompt(rules: RulesData, state: WorldState, npcs: NPCsData): string {
@@ -53,15 +56,30 @@ ${npcIntro || "（暂无 NPC 数据）"}
   "departure_note": "出发轨迹说明（仅当 action=move 时）",
   "event": { "id": "唯一标识，预定义事件用上方列表中的 id，自定义事件自己取一个唯一的", "name": "...", "type": "problem/encounter/ambient/event/custom", "description": "事件的一两句描述", "location": "...", "status": "未处理" },
   "event_note": "仅当 event 不为 null 时填写，简短描述事件触发",
-  "resolve_event_id": "当睦子米已处理了某事件，且该事件的剧情已自然结束时，设为此事件的 id 来收束它。不要在收到睦子米的处理消息后立刻收束——让互动有来有回，至少等一个 tick 周期再收束。"
+  "resolve_event_id": "当睦子米已处理了某事件，且该事件的剧情已自然结束时，设为此事件的 id 来收束它。不要在收到睦子米的处理消息后立刻收束——让互动有来有回，至少等一个 tick 周期再收束。",
+  "notify_mutsumi": "需要通知睦子米时填写（一句话描述发生了什么），不需要时留 null"
 }
 
 如果不想创建事件，event 和 event_note 都留 null。平淡的日子没关系。
 
-当写 NPC 偶遇叙事时，参考上方的 NPC 人物介绍，让对话和行为符合人设。`;
+当写 NPC 偶遇叙事时，参考上方的 NPC 人物介绍，让对话和行为符合人设。
+
+===== 通知时机（notify_mutsumi） =====
+
+填写 notify_mutsumi 的场景：
+- 睦子米到达目的地了（告诉她周围有什么，她可能想记日记或探索）
+- 新事件出现了（NPC 靠近、纸条、异常——她需要知道才能处理）
+- 下一段日程该出发了（提前几分钟提醒路线，让她自己决定是否 move_to）
+- 事件收束了（告诉她结果）
+- 环境发生显著变化（天气突变、铃声响起等）
+
+留 null 的场景：
+- 睦子米在睡觉且无事发生
+- 环境没有变化，平淡的 tick
+- 距离上次通知不到 10 分钟且无新情况`;
 }
 
-function buildDMTickPrompt(state: WorldState, ctx: TickContext, events?: EventsData): string {
+function buildDMTickPrompt(state: WorldState, ctx: TickContext, events?: EventsData, recentChat?: string): string {
   const pos = state._mutsumi.position;
   const posDesc = pos.type === "location"
     ? `目前在 ${pos.name}`
@@ -104,6 +122,12 @@ ${ctx.npc_states.map(n => {
     }
   }
 
+  if (recentChat) {
+    prompt += `\n\n===== 群聊参考（不要编进环境叙事） =====
+睦子米的世界状态检查附带了群聊上下文，仅供你了解她最近参与了什么话题。这些是外部信息，不是你导演的世界的一部分——不要在 environment 里描述群聊内容，也不要替群友编造新消息。
+${recentChat}`;
+  }
+
   return prompt;
 }
 
@@ -132,6 +156,41 @@ function buildTickContext(
     mutsumi_position: state._mutsumi.position,
     npc_states: npcStates,
   };
+}
+
+const QQ_SESSION_KEY = "agent:main:main";
+const QQ_GROUP_ID = "5B07AA16B5A5253C5B89E0021CF0CF15";
+const OPENCLAW_BIN = process.platform === "win32"
+  ? "C:\\Users\\Administrator\\AppData\\Roaming\\npm\\openclaw.cmd"
+  : "openclaw";
+
+/** 通过 openclaw agent CLI 通知睦子米（不加 --deliver，bot 只调工具不说话）。 */
+function notifyMutsumi(message: string, log: Logger): void {
+  const fullMessage = `[DM 世界通知]\n${message}\n\n（系统通知，无需回复。如需行动直接使用工具。）`;
+  try {
+    // 写临时文件避免 shell 转义问题
+    const tmpFile = path.join(os.tmpdir(), `mutsumi-notify-${Date.now()}.txt`);
+    fs.writeFileSync(tmpFile, fullMessage, "utf-8");
+    const args = [
+      "agent",
+      "--session-key", QQ_SESSION_KEY,
+      "--channel", "qqbot",
+      "--reply-to", `qqbot:group:${QQ_GROUP_ID}`,
+      "--message-file", tmpFile,
+      // 不加 --deliver：bot 处理消息、调工具，但不发文字到 QQ 群
+    ];
+    const spawnArgs = process.platform === "win32"
+      ? ["/c", OPENCLAW_BIN, ...args]
+      : args;
+    const spawnCmd = process.platform === "win32" ? "cmd.exe" : OPENCLAW_BIN;
+    const proc = spawn(spawnCmd, spawnArgs, { stdio: "ignore", detached: true });
+    proc.unref();
+    // 1 分钟后清理临时文件
+    setTimeout(() => { try { fs.unlinkSync(tmpFile); } catch { /* ignore */ } }, 60_000);
+    log.info(`DM notify → ${message.slice(0, 80)}${message.length > 80 ? "…" : ""}`);
+  } catch (err) {
+    log.warn(`DM notify spawn failed: ${String(err)}`);
+  }
 }
 
 function applyDMResponse(
@@ -277,7 +336,7 @@ export function startDMScheduler(
   api: OpenClawPluginApi,
   dataDir: string,
   workspaceDir: string,
-): { stop: () => void; handleMoveTo: (location: string, reason?: string) => Promise<string>; handleEvent: (eventId: string, action?: string) => Promise<string>; handleWorldStatus: () => Promise<string>; handleWriteDiary: (text: string) => Promise<string> } {
+): { stop: () => void; handleMoveTo: (location: string, reason?: string) => Promise<string>; handleEvent: (eventId: string, action?: string) => Promise<string>; handleWorldStatus: (recentChat?: string) => Promise<string>; handleWriteDiary: (text: string) => Promise<string> } {
   const log: Logger = createLogger(dataDir, api.logger);
   log.info("DM scheduler starting", { dataDir });
 
@@ -356,11 +415,12 @@ export function startDMScheduler(
 
     const time = getTime();
     const ctx = buildTickContext(state, time, locations, network, npcs);
-    const prompt = buildDMTickPrompt(state, ctx, events);
+    const prompt = `（系统：新的一天开始了。）\n\n${buildDMTickPrompt(state, ctx, events)}`;
     const response = await dmSession.send(prompt);
-    log.info(`DM midnight → ${response.environment || "(无环境描述)"}`);
+    log.info(`DM midnight → ${response.environment || "(无环境描述)"}${response.notify_mutsumi ? " [🔔 notify]" : " [🔇 silent]"}`);
 
     applyDMResponse(state, response, time, eventLookup);
+    if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
     state.last_tick = time;
     writeWorld(dataDir, state);
     saveDMSessionState(dataDir, date, dmSession, log);
@@ -429,10 +489,11 @@ export function startDMScheduler(
     const ctx = buildTickContext(state, time, locations, network, npcs);
 
     if (dmSession) {
-      const prompt = buildDMTickPrompt(state, ctx, events);
+      const prompt = `（系统定时推进世界。这轮 tick 是自主发起的——如有值得通知睦子米的事，使用 notify_mutsumi。）\n\n${buildDMTickPrompt(state, ctx, events)}`;
       const response = await dmSession.send(prompt);
-      log.info(`Tick ${time} → ${response.environment || "(无声)"}${response.event ? ` [事件: ${response.event.name}]` : ""}`);
+      log.info(`Tick ${time} → ${response.environment || "(无声)"}${response.event ? ` [事件: ${response.event.name}]` : ""}${response.notify_mutsumi ? ` [🔔 notify]` : " [🔇 silent]"}`);
       applyDMResponse(state, response, time, eventLookup);
+      if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
       saveDMSessionState(dataDir, state.date, dmSession, log);
     }
 
@@ -463,11 +524,16 @@ export function startDMScheduler(
       log.info(`Recovered from crash. Last tick was ${state.last_tick}`);
 
       if (state.date === getDate()) {
-        // 当天：恢复 DM session
+        // 当天：恢复 DM session（替换旧的 system prompt 以应用最新指引）
         const archive = loadDMSession(dataDir, state.date);
         if (archive && archive.history.length > 0) {
-          dmSession = llmClient.restoreDMSession(archive.history);
-          log.info(`DM session restored: ${archive.history.length} messages from ${archive.saved_at}`);
+          const sysPrompt = buildDMSystemPrompt(rules, state, npcs);
+          const history = [...archive.history];
+          if (history[0]?.role === "system") {
+            history[0] = { role: "system", content: sysPrompt };
+          }
+          dmSession = llmClient.restoreDMSession(history);
+          log.info(`DM session restored: ${history.length} messages from ${archive.saved_at}`);
         } else {
           await midnightRoutine();
         }
@@ -519,8 +585,9 @@ export function startDMScheduler(
         const prompt = buildDMTickPrompt(state, ctx, events) + "\n（睦子米刚到目的地，请描述到达时的场景。）";
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
+        if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
         markDMTick(time);
-        log.info(`Arrival DM tick at ${state._mutsumi.position.type === "location" ? (state._mutsumi.position as {type:"location";name:string}).name : "?"} → ${response.environment || "(无)"}`);
+        log.info(`Arrival DM tick at ${state._mutsumi.position.type === "location" ? (state._mutsumi.position as {type:"location";name:string}).name : "?"} → ${response.environment || "(无)"}${response.notify_mutsumi ? " [🔔 notify]" : " [🔇 silent]"}`);
       }
 
       const currentLoc = state._mutsumi.position.type === "location"
@@ -547,6 +614,7 @@ export function startDMScheduler(
         const prompt = `当前时间：${time}。睦子米刚从${currentLoc}出发去${location}${reason ? `（${reason}）` : ""}。请描述她动身离开${currentLoc}时的场景。不要描述目的地——她还没到。`;
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
+        if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
         saveDMSessionState(dataDir, state.date, dmSession, log);
         markDMTick(time);
       }
@@ -574,9 +642,10 @@ export function startDMScheduler(
               const prompt = buildDMTickPrompt(s, ctx, events) + "\n（睦子米到达了目的地，请描述到达时的场景。）";
               const resp = await dmSession.send(prompt);
               applyDMResponse(s, resp, t, eventLookup);
+              if (resp.notify_mutsumi) notifyMutsumi(resp.notify_mutsumi, log);
               saveDMSessionState(dataDir, s.date, dmSession, log);
               markDMTick(t);
-              log.info(`Scheduled arrival at ${targetLocation} → ${resp.environment || "(无)"}`);
+              log.info(`Scheduled arrival at ${targetLocation} → ${resp.environment || "(无)"}${resp.notify_mutsumi ? " [🔔 notify]" : " [🔇 silent]"}`);
             }
             s.last_tick = t;
             writeWorld(dataDir, s);
@@ -622,6 +691,7 @@ export function startDMScheduler(
           : `（睦子米开始处理事件「${event.name}」${action ? `：${action}` : ""}。先描述场景和NPC反应，不要立刻收束此事件。）`;
         const response = await dmSession.send(dmPrompt);
         applyDMResponse(state, response, time, eventLookup);
+        if (response.notify_mutsumi) notifyMutsumi(response.notify_mutsumi, log);
         saveDMSessionState(dataDir, state.date, dmSession, log);
         dmNarrative = response.environment ? ` — ${response.environment}` : "";
       }
@@ -635,7 +705,7 @@ export function startDMScheduler(
       const prefix = alreadyHandling ? `继续处理「${event.name}」` : `处理「${event.name}」`;
       return `${prefix}${dmNarrative}${wasResolved ? "（事件已结束）" : ""}`;
     },
-    async handleWorldStatus(): Promise<string> {
+    async handleWorldStatus(recentChat?: string): Promise<string> {
       const state = readWorld(dataDir);
       advanceTravelingIfNeeded(state);
       const time = getTime();
@@ -644,12 +714,13 @@ export function startDMScheduler(
       const shouldTick = getMinutesSinceLastDMTick(time) >= DM_TICK_COOLDOWN_MINUTES;
       if (dmSession && shouldTick) {
         const ctx = buildTickContext(state, time, locations, network, npcs);
-        const prompt = buildDMTickPrompt(state, ctx, events);
+        const prompt = `（睦子米查看了世界状态——她主动发起的，不需要 notify_mutsumi。）\n\n${buildDMTickPrompt(state, ctx, events, recentChat)}`;
         const response = await dmSession.send(prompt);
         applyDMResponse(state, response, time, eventLookup);
+        // world_status 不 notify（睦子米主动查的，她已经知道结果了）
         saveDMSessionState(dataDir, state.date, dmSession, log);
         markDMTick(time);
-        log.info(`world_status DM tick → ${response.environment || "(无声)"}`);
+        log.info(`world_status DM tick → ${response.environment || "(无声)"} [🔇 skip notify]`);
       }
 
       state.last_tick = time;

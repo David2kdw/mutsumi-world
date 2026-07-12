@@ -20,6 +20,8 @@ export interface DMResponse {
   resolve_event_id?: string;
   move_to?: string;
   departure_note?: string;
+  /** DM 填写此字段时，插件会通过 openclaw agent CLI 通知睦子米（不发到 QQ，只触发工具调用）。留 null 则 silent tick。 */
+  notify_mutsumi?: string | null;
 }
 
 export interface LLMClient {
@@ -69,16 +71,26 @@ function parseJSONResponse(text: string): DMResponse {
   let cleaned = text.trim();
 
   // 去掉 markdown 代码块包裹
-  const fenceMatch = cleaned.match(/^```(?:json)?\s*\n([\s\S]*?)\n\s*```$/);
+  const fenceMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?\s*```/);
   if (fenceMatch) {
     cleaned = fenceMatch[1].trim();
   }
 
+  // 尝试直接解析
   try {
     return JSON.parse(cleaned) as DMResponse;
   } catch {
-    // 如果解析失败，返回 no-op
-    return { action: "none", environment: cleaned.slice(0, 500) };
+    // 失败：用正则从文本中提取第一个 JSON 对象
+    const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      try {
+        return JSON.parse(jsonMatch[0]) as DMResponse;
+      } catch {
+        // 继续 fallthrough
+      }
+    }
+    // 彻底失败：返回 no-op，不要把 raw JSON 文本当 environment
+    return { action: "none", environment: "(DM 输出格式异常)" };
   }
 }
 

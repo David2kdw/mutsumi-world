@@ -19,13 +19,22 @@ export function registerTools(
   api.registerTool({
     name: "world_status",
     label: "查看世界状态",
-    description: "查看当前时间、位置、天气、今天发生了什么。当群友问「今天怎么样」「在哪」「做了什么」时先调用。",
-    parameters: { type: "object", properties: {} },
-    async execute() {
-      log.info("睦子米使用 world_status");
+    description: "查看当前时间、位置、天气、今天发生了什么。当群友问「今天怎么样」「在哪」「做了什么」时先调用。如果群里最近在聊什么相关话题，用 recent_chat 参数简短附上。",
+    parameters: {
+      type: "object",
+      properties: {
+        recent_chat: {
+          type: "string",
+          description: "最近在群里聊的话题摘要（可选）。简要说明最近讨论的内容，DM 会以此为参考生成更贴合情境的叙事。",
+        },
+      },
+    },
+    async execute(_toolCallId, params) {
+      const p = params as { recent_chat?: string };
+      log.info("睦子米使用 world_status" + (p.recent_chat ? `（聊天：${p.recent_chat.slice(0, 50)}）` : ""));
       try {
         // 先触发 DM tick 刷新世界，再返回状态
-        const result = await scheduler.handleWorldStatus();
+        const result = await scheduler.handleWorldStatus(p.recent_chat);
         log.info(`睦子米 world_status → ${result}`);
         return textResult(result);
       } catch {
