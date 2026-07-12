@@ -114,7 +114,7 @@ ${npcIntro || "（暂无 NPC 数据）"}
 - 距离上次通知不到 10 分钟且无新情况`;
 }
 
-function buildDMTickPrompt(state: WorldState, ctx: TickContext, events?: EventsData, recentChat?: string): string {
+function buildDMTickPrompt(state: WorldState, ctx: TickContext, recentChat?: string): string {
   const pos = state._mutsumi.position;
   const posDesc = pos.type === "location"
     ? `目前在 ${pos.name}`
@@ -125,14 +125,25 @@ ${posDesc}
 
 今日轨迹：
 ${state._mutsumi.trajectory.map(t => `- ${t.time} ${t.note}`).join("\n")}
-
-活跃事件：
-${state._dm.active_events.map(e => {
-    let timeInfo = `${e.created_at} 开始`;
-    if (e.handled_at) timeInfo += `，${e.handled_at} 开始处理`;
-    return `- ${e.name} [id: ${e.id}]（${e.status}，位置：${e.location}，${timeInfo}）${e.description ? ` — ${e.description}` : ""}`;
-  }).join("\n") || "无"}
 `;
+
+  // Activity context replaces old "活跃事件" section
+  const act = state._dm.active_activity;
+  if (act) {
+    const interludesStatus = act.interludes.map(i => {
+      let status = i.handled ? "已处理" : "待触发";
+      if (i.mutsumi_response) status += ` — 睦回应: ${i.mutsumi_response}`;
+      return `- [${i.id}] ${i.time_minutes}min: ${i.description}（${status}）`;
+    }).join("\n");
+    prompt += `
+活跃活动：${act.name}（${act.status}，${act.initiator}发起，位置：${act.location}，已过 ${act.elapsed_minutes}/${act.duration_minutes} 分钟）
+简报：${act.brief}
+插曲：
+${interludesStatus || "（无）"}
+`;
+  } else {
+    prompt += `\n活跃活动：无\n`;
+  }
 
   if (ctx.current_segment) {
     prompt += `\n当前日程：${ctx.current_segment.start}-${ctx.current_segment.end} ${ctx.current_segment.location} | ${ctx.current_segment.activity}`;
@@ -148,13 +159,6 @@ ${ctx.npc_states.map(n => {
   const p = n.position;
   return `- ${n.display}：${p.type === "location" ? p.name : `从${p.from}去${p.to}的路上`}`;
 }).join("\n")}`;
-  }
-
-  if (events && pos.type === "location") {
-    const locEvents = events[pos.name];
-    if (locEvents && locEvents.length > 0) {
-      prompt += `\n\n当前位置（${pos.name}）可能发生的事件：\n${locEvents.map(e => `- ${e.name} [id: ${e.id}]（${e.type}, 稀有度: ${e.rarity}）：${e.description}`).join("\n")}`;
-    }
   }
 
   if (recentChat) {
