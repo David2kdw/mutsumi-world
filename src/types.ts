@@ -12,7 +12,9 @@ export interface DMState {
   weather: string;
   schedule: ScheduleEntry[];
   environment: string;
-  active_events: GameEvent[];
+  active_activity: Activity | null;
+  dm_activity_count: number;
+  last_dm_activity_time?: string;
 }
 
 export interface ScheduleEntry {
@@ -22,22 +24,28 @@ export interface ScheduleEntry {
   activity: string;
 }
 
-export interface GameEvent {
+// ====== Activity (replaces GameEvent) ======
+
+export interface Activity {
   id: string;
   name: string;
-  type: string;         // "problem" | "encounter" | "ambient" | "event" | "custom"
-  rarity: string;       // "common" | "uncommon" | "rare" | "custom"
-  description: string;
+  brief: string;
+  status: "pending" | "active" | "paused";
+  initiator: "dm" | "mutsumi";
   location: string;
-  status: string;       // "未处理" | "处理中" | ...
-  created_at: string;   // "HH:MM" — 事件创建时间
-  handled_at?: string;  // "HH:MM" — 睦子米开始处理的时间
-  tags?: string[];
-  resolve_hint?: string;
-  npc_optional?: string;
-  npc_required?: string[];
-  condition?: string;
-  season?: string;
+  duration_minutes: number;
+  elapsed_minutes: number;
+  started_at: string;        // "HH:MM" — empty when pending
+  created_at: string;        // "HH:MM"
+  interludes: Interlude[];
+}
+
+export interface Interlude {
+  id: string;                // "1", "2" ...
+  time_minutes: number;      // trigger at this elapsed minute mark
+  description: string;
+  handled: boolean;
+  mutsumi_response?: string;
 }
 
 export interface MutsumiState {
@@ -133,26 +141,6 @@ export interface WeatherData {
   [season: string]: SeasonConfig;
 }
 
-// ====== Events ======
-
-export interface EventDef {
-  id: string;
-  name: string;
-  type: string;
-  rarity: string;
-  description: string;
-  tags?: string[];
-  resolve_hint?: string;
-  npc_optional?: string;
-  npc_required?: string[];
-  condition?: string;
-  season?: string;
-}
-
-export interface EventsData {
-  [location: string]: EventDef[];
-}
-
 // ====== NPC ======
 
 export interface NPCDef {
@@ -189,11 +177,8 @@ export interface NPCState {
 export interface RulesData {
   tone: string;
   environment_style: string;
-  event_selection: string;
   movement_policy: string;
   continuity: string;
-  max_events_per_day: number;
-  event_cooldown: Record<string, string>;
   write_journal: boolean;
 }
 
